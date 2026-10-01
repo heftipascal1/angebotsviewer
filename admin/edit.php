@@ -29,7 +29,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $title = trim($_POST['title'] ?? '');
     $kindLabel = normalizeKind($_POST['kind_label'] ?? '');
+    $heading = normalizeHeading($_POST['heading'] ?? '');
     $newPassword = $_POST['password'] ?? '';
+    $removePassword = !empty($_POST['remove_password']);
     $changes = [];
 
     if ($title === '') {
@@ -47,6 +49,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $changes[] = 'Bezeichnung auf „' . $kindLabel . '" geändert';
         }
 
+        // 1a2) Überschrift auf der Passwort-Seite (leer = Standard)
+        $oldHeading = trim((string)($offer['heading'] ?? ''));
+        if ($heading !== $oldHeading) {
+            $db->prepare("UPDATE offers SET heading = ? WHERE id = ?")->execute([$heading !== '' ? $heading : null, $id]);
+            $changes[] = $heading !== '' ? 'Überschrift auf „' . $heading . '" geändert' : 'Überschrift auf Standard zurückgesetzt';
+        }
+
         // 1b) Ablaufdatum
         $expiresInput = trim($_POST['expires_at'] ?? '');
         $newExpires = ($expiresInput !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $expiresInput))
@@ -58,11 +67,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $changes[] = $newExpires ? 'Ablaufdatum gesetzt' : 'Ablaufdatum entfernt';
         }
 
-        // 2) Passwort (nur wenn ein neues eingegeben wurde)
-        if ($newPassword !== '') {
+        // 2) Passwort: entfernen (Link ohne Passwort) oder neu setzen
+        if ($removePassword) {
+            if (offerHasPassword($offer)) {
+                $db->prepare("UPDATE offers SET password_hash = '', password_enc = NULL WHERE id = ?")->execute([$id]);
+                $changes[] = 'Passwort entfernt – der Link öffnet sich jetzt direkt';
+            }
+        } elseif ($newPassword !== '') {
             $db->prepare("UPDATE offers SET password_hash = ?, password_enc = ? WHERE id = ?")
                ->execute([password_hash($newPassword, PASSWORD_BCRYPT), encryptSecret($newPassword), $id]);
-            $changes[] = 'Passwort geändert';
+            $changes[] = offerHasPassword($offer) ? 'Passwort geändert' : 'Passwort gesetzt';
         }
 
         // 2b) Startseite eines mehrseitigen Angebots wechseln
@@ -201,9 +215,25 @@ $pages     = $isBundle ? bundleListPages($offer['slug']) : [];
             </div>
 
             <div class="form-group">
-                <label>Neues Passwort</label>
-                <input type="text" name="password" placeholder="Leer lassen = Passwort unverändert">
-                <p class="form-hint">Nur ausfüllen, wenn du das Passwort ändern möchtest. Das alte Passwort wird nirgends im Klartext gespeichert.</p>
+                <label>Überschrift auf der Passwort-Seite (optional)</label>
+                <input type="text" name="heading" maxlength="80" placeholder="<?= e(BRAND_NAME) ?>" value="<?= e((string)($offer['heading'] ?? '')) ?>">
+                <p class="form-hint">Steht oben auf der Passwort-Seite. Leer = „<?= e(BRAND_NAME) ?>".</p>
+            </div>
+
+            <div class="form-group">
+                <label>Passwort</label>
+                <?php if (offerHasPassword($offer)): ?>
+                    <p class="form-hint" style="margin-bottom:.5rem">Aktuell: <strong>mit Passwort geschützt</strong>.</p>
+                    <input type="text" name="password" placeholder="Neues Passwort – leer lassen = unverändert" id="pwInput">
+                    <label style="display:flex;align-items:center;gap:.6rem;cursor:pointer;margin-top:.6rem">
+                        <input type="checkbox" name="remove_password" value="1" id="pwRemove" style="width:auto">
+                        Passwort entfernen – Link öffnet das Angebot direkt
+                    </label>
+                    <p class="form-hint">Das alte Passwort wird nirgends im Klartext gespeichert.</p>
+                <?php else: ?>
+                    <p class="form-hint" style="margin-bottom:.5rem">Aktuell: <strong>ohne Passwort</strong> – der Link öffnet das Angebot direkt.</p>
+                    <input type="text" name="password" placeholder="Passwort eingeben, um den Zugang zu schützen (optional)">
+                <?php endif; ?>
             </div>
 
             <div class="form-group">
@@ -269,6 +299,11 @@ $pages     = $isBundle ? bundleListPages($offer['slug']) : [];
 </div>
 
 <script>
+(function () {
+    const rm = document.getElementById('pwRemove');
+    const pw = document.getElementById('pwInput');
+    if (rm && pw) rm.addEventListener('change', function () { pw.disabled = rm.checked; if (rm.checked) pw.value = ''; });
+})();
 (function () {
     const sel = document.getElementById('kindSelect');
     const inp = document.getElementById('kindInput');

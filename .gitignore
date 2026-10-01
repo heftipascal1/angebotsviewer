@@ -1,0 +1,22 @@
+# Lokale Konfiguration (Zugangsdaten) – niemals committen
+config.php
+
+# Hochgeladene Angebote bleiben auf dem Server
+uploads/*
+!uploads/.htaccess
+!uploads/.gitkeep
+
+# Installer wird nach der Installation gelöscht
+install.php
+
+# Betriebssystem / Editor
+.DS_Store
+Thumbs.db
+__MACOSX/
+*.swp
+.idea/
+.vscode/
+
+# Lokale Build-Artefakte
+/dist/
+*.zip

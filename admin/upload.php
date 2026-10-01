@@ -19,7 +19,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $title = trim($_POST['title'] ?? '');
     $kindLabel = normalizeKind($_POST['kind_label'] ?? '');
-    $password = $_POST['password'] ?? '';
+    $heading = normalizeHeading($_POST['heading'] ?? '');
+    $password = $_POST['password'] ?? '';   // leer = ohne Passwort, Link öffnet direkt
     $expiresInput = trim($_POST['expires_at'] ?? '');
     // Datum (YYYY-MM-DD) → bis Ende des Tages gültig
     $expiresAt = ($expiresInput !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $expiresInput))
@@ -28,8 +29,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($title === '') {
         $error = 'Bitte gib einen Titel ein.';
-    } elseif ($password === '') {
-        $error = 'Bitte vergib ein Passwort.';
     } elseif (!isset($_FILES['htmlfile']) || $_FILES['htmlfile']['error'] !== UPLOAD_ERR_OK) {
         $error = 'Bitte lade eine HTML-Datei oder ein ZIP hoch.';
     } else {
@@ -70,18 +69,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($ok) {
                 $stmt = $db->prepare("
-                    INSERT INTO offers (title, slug, kind_label, password_hash, filename, original_filename, expires_at, password_enc, bundle_type, entry_file)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO offers (title, slug, kind_label, heading, password_hash, filename, original_filename, expires_at, password_enc, bundle_type, entry_file)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ");
                 $stmt->execute([
                     $title,
                     $slug,
                     $kindLabel,
-                    password_hash($password, PASSWORD_BCRYPT),
+                    $heading !== '' ? $heading : null,
+                    $password !== '' ? password_hash($password, PASSWORD_BCRYPT) : '',
                     $storedName,
                     $file['name'],
                     $expiresAt,
-                    encryptSecret($password),
+                    $password !== '' ? encryptSecret($password) : null,
                     $bundleType,
                     $entryFile,
                 ]);
@@ -99,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'typ'         => $kindLabel,
                     'titel'       => $title,
                     'link'        => $createdLink,
-                    'passwort'    => $password,
+                    'passwort'    => $password !== '' ? $password : 'nicht nötig – der Link öffnet sich direkt',
                     'gueltig_bis' => $expiresAt ? date('d.m.Y', strtotime($expiresAt)) : 'unbegrenzt',
                 ]);
             } elseif ($ext === 'zip' && !$ok) {
@@ -237,9 +237,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
 
                 <div class="form-group">
-                    <label>Passwort für den Kunden</label>
-                    <input type="text" name="password" placeholder="z.B. Mueller2026" required>
-                    <p class="form-hint">Der Kunde braucht dieses Passwort, um das Angebot zu öffnen.</p>
+                    <label>Überschrift auf der Passwort-Seite (optional)</label>
+                    <input type="text" name="heading" maxlength="80" placeholder="<?= e(BRAND_NAME) ?>" value="<?= e($_POST['heading'] ?? '') ?>">
+                    <p class="form-hint">Steht oben auf der Seite, auf der der Kunde das Passwort eingibt (z.B. dein Firmenname oder „Gästebuch Hotel Sonne"). Leer = „<?= e(BRAND_NAME) ?>".</p>
+                </div>
+
+                <div class="form-group">
+                    <label>Passwort für den Kunden (optional)</label>
+                    <input type="text" name="password" placeholder="z.B. Mueller2026 – leer lassen für Zugang ohne Passwort">
+                    <p class="form-hint">Mit Passwort muss der Kunde es zuerst eingeben. <strong>Leer lassen</strong> = der Link öffnet das Angebot direkt, Aufrufe werden trotzdem gezählt.</p>
                 </div>
 
                 <div class="form-group">

@@ -121,6 +121,19 @@ function migrations(): array {
                 $db->exec("ALTER TABLE offers ADD COLUMN kind_label VARCHAR(60) NOT NULL DEFAULT 'Angebot'");
             }
         },
+
+        // v1.7.0: eigene Überschrift auf der Passwort-Seite (leer = BRAND_NAME)
+        //         + Archivieren (Kunde sieht einen Archiv-Hinweis).
+        // Angebote ohne Passwort brauchen keine Schema-Änderung: dort ist
+        // password_hash einfach leer ('').
+        6 => function (PDO $db) {
+            if (!columnExists($db, 'offers', 'heading')) {
+                $db->exec("ALTER TABLE offers ADD COLUMN heading VARCHAR(80) NULL DEFAULT NULL");
+            }
+            if (!columnExists($db, 'offers', 'is_archived')) {
+                $db->exec("ALTER TABLE offers ADD COLUMN is_archived TINYINT(1) NOT NULL DEFAULT 0");
+            }
+        },
     ];
 }
 

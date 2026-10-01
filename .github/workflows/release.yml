@@ -1,0 +1,69 @@
+# Baut bei jedem Tag "vX.Y.Z" automatisch das Update-Paket
+# heftis-angebote-vX.Y.Z.zip und hängt es an ein GitHub-Release.
+# Genau dieses ZIP holt sich der eingebaute Updater (Admin → Update →
+# "Nach Updates suchen") bzw. kann manuell hochgeladen werden.
+#
+# Neues Release veröffentlichen:
+#   1. APP_VERSION in includes/version.php erhöhen (und ggf. DB_VERSION
+#      + Migration), committen und pushen.
+#   2. git tag v1.7.0 && git push origin v1.7.0
+#   → Der Workflow prüft, dass Tag und APP_VERSION übereinstimmen.
+
+name: Release-Paket bauen
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code auschecken
+        uses: actions/checkout@v4
+
+      - name: Tag mit APP_VERSION abgleichen
+        id: meta
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          APP_VERSION=$(sed -n "s/^define('APP_VERSION', '\([^']*\)');.*/\1/p" includes/version.php)
+          echo "Tag: $VERSION · includes/version.php: $APP_VERSION"
+          if [ "$VERSION" != "$APP_VERSION" ]; then
+            echo "::error::Tag $TAG passt nicht zu APP_VERSION $APP_VERSION in includes/version.php"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "zip=heftis-angebote-v$VERSION.zip" >> "$GITHUB_OUTPUT"
+
+      - name: PHP-Syntax prüfen
+        run: |
+          find . -name '*.php' -not -path './.git/*' -print0 | xargs -0 -n1 php -l > /dev/null
+
+      - name: Update-Paket packen
+        run: |
+          set -e
+          STAGE="$RUNNER_TEMP/heftis-angebote"
+          rm -rf "$STAGE" && mkdir -p "$STAGE"
+          # Alles außer Git/CI-Dateien, lokaler Konfiguration und Upload-Inhalten
+          rsync -a ./ "$STAGE/" \
+            --exclude '.git' --exclude '.github' --exclude '.gitignore' \
+            --exclude 'config.php' --exclude 'install.php' \
+            --exclude 'uploads/*' --exclude '.DS_Store' --exclude 'dist'
+          mkdir -p "$STAGE/uploads"
+          cp uploads/.htaccess uploads/.gitkeep "$STAGE/uploads/"
+          mkdir -p dist
+          (cd "$RUNNER_TEMP" && zip -qr "$GITHUB_WORKSPACE/dist/${{ steps.meta.outputs.zip }}" heftis-angebote)
+          unzip -l "dist/${{ steps.meta.outputs.zip }}" | tail -n 5
+
+      - name: Release anlegen und ZIP anhängen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" "dist/${{ steps.meta.outputs.zip }}" \
+            --title "Heftis Angebote ${{ steps.meta.outputs.version }}" \
+            --generate-notes

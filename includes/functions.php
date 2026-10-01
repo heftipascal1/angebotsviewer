@@ -117,6 +117,48 @@ function kindSentence(string $label, string $predicate, string $fallbackSubject 
     return $subject . ' ' . $predicate;
 }
 
+/* ===== Überschrift & Passwort-Schutz pro Eintrag ===== */
+
+/** Bereinigt eine eingegebene Überschrift. Leer -> '' (= Standard BRAND_NAME). */
+function normalizeHeading(string $heading): string {
+    $heading = trim(preg_replace('/\s+/u', ' ', $heading));
+    if (mb_strlen($heading) > 80) $heading = mb_substr($heading, 0, 80);
+    return $heading;
+}
+
+/** Überschrift, die der Kunde auf der Passwort-/Hinweis-Seite sieht. */
+function offerHeading(array $offer): string {
+    $h = trim((string)($offer['heading'] ?? ''));
+    return $h !== '' ? $h : BRAND_NAME;
+}
+
+/** true, wenn der Eintrag passwortgeschützt ist (leerer Hash = frei zugänglich). */
+function offerHasPassword(array $offer): bool {
+    return trim((string)($offer['password_hash'] ?? '')) !== '';
+}
+
+/* ===== Status eines Eintrags ===== */
+
+/** 'archived' | 'expired' | 'paused' | 'active' (in dieser Priorität). */
+function offerStatus(array $offer): string {
+    if (!empty($offer['is_archived']) && (int)$offer['is_archived'] === 1) return 'archived';
+    if (!empty($offer['expires_at']) && strtotime($offer['expires_at']) < time()) return 'expired';
+    if (!empty($offer['is_paused']) && (int)$offer['is_paused'] === 1) return 'paused';
+    return 'active';
+}
+
+/** Anzeigenamen der Status-Werte (für Badges und Filter). */
+function offerStatusLabels(): array {
+    return ['active' => 'Aktiv', 'paused' => 'Pausiert', 'expired' => 'Abgelaufen', 'archived' => 'Archiviert'];
+}
+
+/** Text für den Platzhalter {passwort} in der Copy-Paste-Nachricht. */
+function offerPasswordText(array $offer): string {
+    if (!offerHasPassword($offer)) return 'nicht nötig – der Link öffnet sich direkt';
+    $plain = decryptSecret($offer['password_enc'] ?? null);
+    return $plain ?? '(beim Bearbeiten neu setzen)';
+}
+
 /* ===== Copy-Paste-Nachricht ===== */
 function defaultMessageTemplate(): string {
     return "Hallo,\n\n"

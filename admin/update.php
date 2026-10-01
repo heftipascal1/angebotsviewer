@@ -48,6 +48,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
         }
     }
 }
+// ===== Update direkt aus GitHub-Releases =====
+$ghRelease = null;   // Ergebnis von "Nach Updates suchen"
+$ghError   = '';
+if (($_GET['check'] ?? '') === 'github') {
+    $ghRelease = githubFetchRelease();
+    if (isset($ghRelease['error'])) {
+        $ghError = $ghRelease['error'];
+        $ghRelease = null;
+    }
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'github_install') {
+    verifyCsrf();
+    $tag = trim((string)($_POST['tag'] ?? ''));
+    if (!preg_match('/^v?\d+\.\d+\.\d+$/', $tag)) {
+        $error = 'Ungültige Release-Angabe.';
+    } else {
+        $uploadResult = githubInstallRelease($tag, $appRoot);
+        if (empty($uploadResult['errors'])) {
+            header('Location: update.php?updated=' . $uploadResult['copied'] . '&from=github');
+            exit;
+        }
+    }
+}
 $justUpdated = isset($_GET['updated']) ? (int)$_GET['updated'] : null;
 
 $needsMigration = $dbVersion < DB_VERSION;
@@ -109,7 +132,7 @@ $installerPresent = is_file(__DIR__ . '/../install.php');
 
     <?php if ($justUpdated !== null): ?>
         <div class="card"><div class="alert alert-success">
-            Update eingespielt: <?= $justUpdated ?> Dateien aktualisiert.
+            Update <?= ($_GET['from'] ?? '') === 'github' ? 'von GitHub ' : '' ?>eingespielt: <?= $justUpdated ?> Dateien aktualisiert.
             <code>config.php</code> und der Ordner <code>uploads/</code> wurden bewusst nicht angefasst.
             <?php if ($needsMigration): ?>
                 <br><br>Es steht noch eine Datenbank-Anpassung an — siehe unten.
@@ -123,6 +146,48 @@ $installerPresent = is_file(__DIR__ . '/../install.php');
             <?= implode('<br>', array_map('htmlspecialchars', $uploadResult['errors'])) ?>
         </div></div>
     <?php endif; ?>
+
+    <div class="card">
+        <div class="card-header"><h2>Update über GitHub</h2></div>
+        <?php if (!githubUpdateAvailable()): ?>
+            <p class="form-hint">Auf diesem Server sind Internet-Downloads aus PHP nicht erlaubt. Bitte das Update-Paket unten als ZIP hochladen.</p>
+        <?php else: ?>
+            <p class="form-hint" style="margin-bottom:1rem">
+                Prüft das Repository <code><?= e(UPDATE_GITHUB_REPO) ?></code> auf ein neueres Release
+                und spielt es mit einem Klick ein. <code>config.php</code> und <code>uploads/</code>
+                bleiben auch hier unangetastet.
+            </p>
+            <?php if ($ghError): ?>
+                <div class="alert alert-error"><?= e($ghError) ?></div>
+            <?php endif; ?>
+            <?php if ($ghRelease !== null): ?>
+                <?php if (githubIsNewer($ghRelease)): ?>
+                    <div class="alert alert-success">
+                        <strong>Neue Version verfügbar: <?= e($ghRelease['version']) ?></strong>
+                        (installiert: <?= e(APP_VERSION) ?>)
+                        <?php if ($ghRelease['published']): ?> · veröffentlicht am <?= e(date('d.m.Y', strtotime($ghRelease['published']))) ?><?php endif; ?>
+                        <br>Paket: <code><?= e($ghRelease['asset_name']) ?></code>
+                        <?php if ($ghRelease['asset_size']): ?> (<?= round($ghRelease['asset_size'] / 1024) ?> KB)<?php endif; ?>
+                        <?php if ($ghRelease['url']): ?> · <a href="<?= e($ghRelease['url']) ?>" target="_blank" rel="noopener" style="color:inherit">Release auf GitHub ansehen</a><?php endif; ?>
+                    </div>
+                    <?php if (trim($ghRelease['notes']) !== ''): ?>
+                        <pre style="white-space:pre-wrap;font-family:inherit;font-size:.85rem;color:var(--text-muted);background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:.8rem 1rem;max-height:220px;overflow:auto"><?= e($ghRelease['notes']) ?></pre>
+                    <?php endif; ?>
+                    <form method="post" style="margin-top:1rem">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="github_install">
+                        <input type="hidden" name="tag" value="<?= e($ghRelease['tag']) ?>">
+                        <button type="submit" class="btn btn-primary">Version <?= e($ghRelease['version']) ?> jetzt herunterladen &amp; einspielen</button>
+                    </form>
+                <?php else: ?>
+                    <div class="alert alert-success">
+                        Du bist auf dem aktuellen Stand (installiert <?= e(APP_VERSION) ?>, neuestes Release <?= e($ghRelease['version']) ?>).
+                    </div>
+                <?php endif; ?>
+            <?php endif; ?>
+            <a href="update.php?check=github" class="btn <?= $ghRelease === null ? 'btn-primary' : 'btn-ghost' ?>" style="margin-top:.5rem">Nach Updates suchen</a>
+        <?php endif; ?>
+    </div>
 
     <div class="card">
         <div class="card-header"><h2>Update einspielen (ZIP)</h2></div>
@@ -166,6 +231,10 @@ $installerPresent = is_file(__DIR__ . '/../install.php');
 
     <div class="card">
         <div class="card-header"><h2>So aktualisierst du das Tool</h2></div>
+        <p class="form-hint" style="margin-bottom:.8rem">
+            Am einfachsten oben über <strong>„Nach Updates suchen"</strong> (GitHub) oder per
+            ZIP-Upload. Der manuelle Weg per FTP geht weiterhin:
+        </p>
         <ol style="padding-left:1.2rem;line-height:2;color:var(--text)">
             <li>Neue Version (ZIP) lokal entpacken.</li>
             <li>Per FTP <strong>alle Dateien überschreiben</strong> —

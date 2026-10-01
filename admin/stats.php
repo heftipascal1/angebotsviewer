@@ -83,13 +83,14 @@ $maxDaily = max(1, max($daily));
 
 $offerLink = BASE_URL . 'a/' . $offer['slug'];
 
-// Copy-Paste-Nachricht (Passwort wird entschlüsselt; bei Altbestand ggf. null)
+// Copy-Paste-Nachricht (Passwort wird entschlüsselt; ohne Passwort = Hinweistext)
 $plainPw = decryptSecret($offer['password_enc'] ?? null);
 $tpl = getSetting($db, 'message_template', '') ?: defaultMessageTemplate();
 $offerMessage = renderOfferMessage($tpl, [
+    'typ'         => offerKind($offer),
     'titel'       => $offer['title'],
     'link'        => $offerLink,
-    'passwort'    => $plainPw ?? '(beim Bearbeiten neu setzen)',
+    'passwort'    => offerPasswordText($offer),
     'gueltig_bis' => !empty($offer['expires_at']) ? date('d.m.Y', strtotime($offer['expires_at'])) : 'unbegrenzt',
 ]);
 ?>
@@ -128,7 +129,7 @@ $offerMessage = renderOfferMessage($tpl, [
             <textarea id="msgBox" readonly style="width:100%;min-height:170px;padding:.8rem 1rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text);font-size:.9rem;line-height:1.5;font-family:inherit;resize:vertical"><?= e($offerMessage) ?></textarea>
             <button type="button" class="btn btn-primary" style="margin-top:.6rem" onclick="copyMsg()">Nachricht kopieren</button>
             <span id="msgCopied" style="margin-left:.6rem;color:var(--success);display:none">Kopiert!</span>
-            <?php if ($plainPw === null): ?>
+            <?php if (offerHasPassword($offer) && $plainPw === null): ?>
                 <p class="form-hint" style="color:var(--warning)">Hinweis: Das Passwort dieses (älteren) Angebots ist nicht hinterlegt. Setze es einmal über „Bearbeiten" neu, dann erscheint es hier automatisch.</p>
             <?php else: ?>
                 <p class="form-hint">Vorlage anpassbar unter <a href="settings.php" style="color:var(--primary)">Einstellungen</a>.</p>

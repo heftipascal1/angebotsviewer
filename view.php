@@ -24,11 +24,10 @@ if (!$offer) {
     die('Angebot nicht gefunden oder nicht mehr verfügbar.');
 }
 
-// Pausiert oder abgelaufen? (Spalten via !empty robust auch vor Migration.)
-$isPaused  = !empty($offer['is_paused']) && (int)$offer['is_paused'] === 1;
-$isExpired = !empty($offer['expires_at']) && strtotime($offer['expires_at']) < time();
-if ($isPaused || $isExpired) {
-    renderUnavailable($isExpired, offerKind($offer));
+// Archiviert, pausiert oder abgelaufen? (Spalten via !empty robust auch vor Migration.)
+$status = offerStatus($offer);
+if ($status !== 'active') {
+    renderUnavailable($status, offerKind($offer), offerHeading($offer));
     exit;
 }
 
@@ -36,55 +35,69 @@ $sessionKey = 'offer_access_' . $offer['id'];
 $ipHash = hashIP($_SERVER['REMOTE_ADDR'] ?? '');
 $error = '';
 
+/**
+ * Zugang freischalten und einen neuen Aufruf aufzeichnen (Statistik,
+ * Heartbeat-Berechtigung, E-Mail-Benachrichtigung mit Spam-Schutz).
+ */
+function grantAccessAndRecordView(PDO $db, array $offer, string $ipHash, string $sessionKey): void {
+    $_SESSION[$sessionKey] = true;
+
+    $viewSession = bin2hex(random_bytes(16));
+    $ua = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500);
+
+    $ins = $db->prepare("
+        INSERT INTO offer_views (offer_id, session_hash, ip_hash, user_agent, started_at, last_heartbeat)
+        VALUES (?, ?, ?, ?, NOW(), NOW())
+    ");
+    $ins->execute([$offer['id'], $viewSession, $ipHash, $ua]);
+    $newViewId = (int)$db->lastInsertId();
+    $_SESSION[$sessionKey . '_view'] = $newViewId;
+    // Erlaubte View-IDs dieser Session (für die Tracking-Absicherung)
+    if (!isset($_SESSION['my_views']) || !is_array($_SESSION['my_views'])) {
+        $_SESSION['my_views'] = [];
+    }
+    $_SESSION['my_views'][] = $newViewId;
+
+    // E-Mail-Benachrichtigung mit Spam-Schutz: höchstens 1 Mail pro
+    // Besucher (ip_hash) und Angebot innerhalb von 6 Stunden.
+    try {
+        $offerId = (int)$offer['id'];
+        $cnt = (int)$db->query("SELECT COUNT(*) FROM offer_views WHERE offer_id = $offerId")->fetchColumn();
+
+        $chk = $db->prepare("
+            SELECT COUNT(*) FROM offer_views
+            WHERE offer_id = ? AND ip_hash = ? AND notified_at IS NOT NULL
+              AND notified_at > (NOW() - INTERVAL 6 HOUR)
+        ");
+        $chk->execute([$offerId, $ipHash]);
+        $recentlyNotified = (int)$chk->fetchColumn() > 0;
+
+        if (!$recentlyNotified) {
+            sendViewNotification($db, $offer, parseUA($ua), $cnt);
+            $db->prepare("UPDATE offer_views SET notified_at = NOW() WHERE id = ?")
+               ->execute([$newViewId]);
+        }
+    } catch (Throwable $ex) {
+        // bewusst ignorieren – Benachrichtigung darf den Aufruf nie stören
+    }
+}
+
+$hasPassword = offerHasPassword($offer);
+
+// Ohne Passwort: Link öffnet sich direkt, Aufruf wird trotzdem gezählt
+// (einmal pro Browser-Session, wie nach einer Passworteingabe).
+if (!$hasPassword && empty($_SESSION[$sessionKey])) {
+    grantAccessAndRecordView($db, $offer, $ipHash, $sessionKey);
+}
+
 // Handle password submit
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($hasPassword && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $lockRemaining = throttleStatus($db, $ipHash, 'offer_' . $offer['id']);
     if ($lockRemaining > 0) {
         $error = 'Zu viele Fehlversuche. Bitte in ' . ceil($lockRemaining / 60) . ' Min. erneut versuchen.';
     } elseif (password_verify($_POST['password'] ?? '', $offer['password_hash'])) {
         throttleReset($db, $ipHash, 'offer_' . $offer['id']);
-        $_SESSION[$sessionKey] = true;
-
-        // Record a new view
-        $viewSession = bin2hex(random_bytes(16));
-        $ua = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500);
-
-        $ins = $db->prepare("
-            INSERT INTO offer_views (offer_id, session_hash, ip_hash, user_agent, started_at, last_heartbeat)
-            VALUES (?, ?, ?, ?, NOW(), NOW())
-        ");
-        $ins->execute([$offer['id'], $viewSession, $ipHash, $ua]);
-        $newViewId = (int)$db->lastInsertId();
-        $_SESSION[$sessionKey . '_view'] = $newViewId;
-        // Erlaubte View-IDs dieser Session (für die Tracking-Absicherung)
-        if (!isset($_SESSION['my_views']) || !is_array($_SESSION['my_views'])) {
-            $_SESSION['my_views'] = [];
-        }
-        $_SESSION['my_views'][] = $newViewId;
-
-        // E-Mail-Benachrichtigung mit Spam-Schutz: höchstens 1 Mail pro
-        // Besucher (ip_hash) und Angebot innerhalb von 6 Stunden.
-        try {
-            $offerId = (int)$offer['id'];
-            $cnt = (int)$db->query("SELECT COUNT(*) FROM offer_views WHERE offer_id = $offerId")->fetchColumn();
-
-            $chk = $db->prepare("
-                SELECT COUNT(*) FROM offer_views
-                WHERE offer_id = ? AND ip_hash = ? AND notified_at IS NOT NULL
-                  AND notified_at > (NOW() - INTERVAL 6 HOUR)
-            ");
-            $chk->execute([$offerId, $ipHash]);
-            $recentlyNotified = (int)$chk->fetchColumn() > 0;
-
-            if (!$recentlyNotified) {
-                sendViewNotification($db, $offer, parseUA($ua), $cnt);
-                $db->prepare("UPDATE offer_views SET notified_at = NOW() WHERE id = ?")
-                   ->execute([$newViewId]);
-            }
-        } catch (Throwable $ex) {
-            // bewusst ignorieren – Benachrichtigung darf den Aufruf nie stören
-        }
-
+        grantAccessAndRecordView($db, $offer, $ipHash, $sessionKey);
         header('Location: ' . BASE_URL . 'a/' . $slug);
         exit;
     } else {
@@ -95,6 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $hasAccess = !empty($_SESSION[$sessionKey]);
 $kind = offerKind($offer);
+$heading = offerHeading($offer);
 
 // ===== Show offer =====
 if ($hasAccess) {
@@ -170,7 +184,7 @@ if ($hasAccess) {
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
         </svg>
     </div>
-    <h1><?= e(BRAND_NAME) ?></h1>
+    <h1><?= e($heading) ?></h1>
     <p class="sub"><?= e(kindSentence($kind, 'ist geschützt.')) ?> Bitte gib das Passwort ein, das du erhalten hast.</p>
 
     <?php if ($error): ?>
@@ -186,20 +200,31 @@ if ($hasAccess) {
 </html>
 <?php
 /**
- * Neutrale "nicht verfügbar"-Seite (pausiert oder abgelaufen) – ohne
- * Tracker-Hinweis, im Branding gehalten.
+ * Neutrale "nicht verfügbar"-Seite (archiviert, pausiert oder abgelaufen) –
+ * ohne Tracker-Hinweis, im Branding bzw. mit der eigenen Überschrift.
  */
-function renderUnavailable(bool $expired, string $kind = 'Angebot'): void {
-    $msg = $expired
-        ? kindSentence($kind, 'ist leider nicht mehr gültig.')
-        : kindSentence($kind, 'ist derzeit nicht verfügbar.');
+function renderUnavailable(string $status, string $kind = 'Angebot', ?string $heading = null): void {
+    $heading = ($heading !== null && $heading !== '') ? $heading : BRAND_NAME;
+    switch ($status) {
+        case 'archived':
+            $msg  = 'Leider wurde ' . lcfirst(kindSentence($kind, 'archiviert.', 'dieser Inhalt'));
+            $hint = 'Bitte melde dich direkt bei uns.';
+            break;
+        case 'expired':
+            $msg  = kindSentence($kind, 'ist leider nicht mehr gültig.');
+            $hint = 'Bitte wende dich bei Fragen an deinen Ansprechpartner.';
+            break;
+        default:
+            $msg  = kindSentence($kind, 'ist derzeit nicht verfügbar.');
+            $hint = 'Bitte wende dich bei Fragen an deinen Ansprechpartner.';
+    }
     ?>
 <!DOCTYPE html>
 <html lang="de">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= e(BRAND_NAME) ?></title>
+    <title><?= e($heading) ?></title>
     <link rel="stylesheet" href="<?= e(BASE_URL) ?>assets/style.css">
 </head>
 <body class="password-page">
@@ -209,8 +234,8 @@ function renderUnavailable(bool $expired, string $kind = 'Angebot'): void {
             <circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>
         </svg>
     </div>
-    <h1><?= e(BRAND_NAME) ?></h1>
-    <p class="sub"><?= e($msg) ?> Bitte wende dich bei Fragen an deinen Ansprechpartner.</p>
+    <h1><?= e($heading) ?></h1>
+    <p class="sub"><?= e($msg) ?> <?= e($hint) ?></p>
 </div>
 </body>
 </html>
