@@ -1,0 +1,10 @@
+# Direkter Zugriff auf hochgeladene Dateien komplett sperren.
+# Die HTML-Angebote werden ausschließlich über file.php (mit Passwortprüfung) ausgeliefert.
+Require all denied
+
+# PHP-Ausführung in diesem Ordner deaktivieren (Schutz vor Code-Upload)
+<FilesMatch "\.(php|phtml|php3|php4|php5|php7|phps|cgi|pl|py|asp|aspx|sh)$">
+    Require all denied
+</FilesMatch>
+
+php_flag engine off

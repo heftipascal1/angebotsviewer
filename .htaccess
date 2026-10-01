@@ -1,0 +1,50 @@
+# ===== Angebots-Tracker — Routing & Sicherheit =====
+
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # HTTPS erzwingen (http -> https). Falls deine Domain (noch) kein SSL hat,
+    # diese 3 Zeilen auskommentieren.
+    RewriteCond %{HTTPS} off
+    RewriteCond %{HTTP:X-Forwarded-Proto} !https
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # Schöne Kunden-Links: /a/{slug}  ->  view.php?slug={slug}
+    # RewriteBase ggf. an Unterordner anpassen (z.B. /offer-tracker/)
+    RewriteRule ^a/([a-f0-9]+)/?$ view.php?slug=$1 [L,QSA]
+
+    # Dateien mehrseitiger Angebote: /f/{slug}/{pfad} -> file.php?slug=..&p=..
+    # Dadurch funktionieren relative Links (unterseite.html, css/style.css,
+    # bilder/logo.png) innerhalb eines hochgeladenen ZIPs ganz normal.
+    RewriteRule ^f/([a-f0-9]+)/?$ file.php?slug=$1 [L,QSA]
+    RewriteRule ^f/([a-f0-9]+)/(.+)$ file.php?slug=$1&p=$2 [L,QSA,B]
+</IfModule>
+
+# Sensible Dateien sperren
+<FilesMatch "^(config\.php|config\.sample\.php)$">
+    Require all denied
+</FilesMatch>
+
+# Sicherheits-Header
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    # Verhindert, dass der geheime Link (Slug) per Referer an Dritte leakt,
+    # falls ein Angebot externe Ressourcen lädt.
+    Header set Referrer-Policy "no-referrer"
+</IfModule>
+
+# PATH_INFO erlauben – Ersatzweg für mehrseitige Angebote
+# (file.php/{slug}/{pfad}), falls mod_rewrite nicht greift.
+AcceptPathInfo On
+
+# UTF-8
+AddDefaultCharset UTF-8
+
+# Upload-Limit (PHP) – falls vom Hoster erlaubt
+<IfModule mod_php.c>
+    php_value upload_max_filesize 12M
+    php_value post_max_size 13M
+</IfModule>
