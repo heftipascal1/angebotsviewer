@@ -47,10 +47,8 @@ if (!$offer) {
     exit;
 }
 
-// Pausiert oder abgelaufen? Dann auch keine Dateien mehr ausliefern.
-$isPaused  = !empty($offer['is_paused']) && (int)$offer['is_paused'] === 1;
-$isExpired = !empty($offer['expires_at']) && strtotime($offer['expires_at']) < time();
-if ($isPaused || $isExpired) {
+// Archiviert, pausiert oder abgelaufen? Dann auch keine Dateien mehr ausliefern.
+if (offerStatus($offer) !== 'active') {
     http_response_code(410);
     exit;
 }
@@ -61,6 +59,7 @@ $isBundle = (($offer['bundle_type'] ?? 'single') === 'bundle');
 // Es ersetzt die Session, weil der Browser im abgeschotteten iframe keine
 // Cookies an nachgeladene Dateien (CSS/JS/Schriften) sendet.
 $hasToken = false;
+$token    = '';
 if ($isBundle) {
     $rel = ltrim(str_replace('\\', '/', $relRaw), '/');
     $slashPos = strpos($rel, '/');
@@ -71,6 +70,7 @@ if ($isBundle) {
             http_response_code(403);
             exit;
         }
+        $token  = $firstSeg;
         $relRaw = $slashPos === false ? '' : substr($rel, $slashPos + 1);
     }
 }
@@ -99,10 +99,9 @@ if ($isBundle) {
         exit;
     }
 
-    $path = realpath($base . '/' . $rel);
-    if ($path === false
-        || strpos($path, $base . DIRECTORY_SEPARATOR) !== 0
-        || !is_file($path)) {
+    // Ordner-Links ("kontakt/") auf deren index.html auflösen
+    $path = bundleResolveFile($base, $rel);
+    if ($path === null) {
         http_response_code(404);
         exit;
     }
@@ -114,12 +113,23 @@ if ($isBundle) {
     }
 
     header('Content-Type: ' . bundleMimeType($ext));
-    header('Content-Length: ' . filesize($path));
     header('X-Content-Type-Options: nosniff');
     header('X-Frame-Options: SAMEORIGIN');
     header('Content-Security-Policy: frame-ancestors \'self\';');
     // Nicht zwischenspeichern: der Link ist personengebunden.
     header('Cache-Control: private, no-store');
+
+    if (in_array($ext, ['html', 'htm', 'css'], true)) {
+        // Absolute Pfade (/css/…, /img/…, /kontakt/) auf das Angebot umbiegen.
+        if ($token === '') $token = bundleAccessToken($slug);
+        $urlBase = bundleFileUrl($db, $slug, '', $token);
+        $body = bundleRewriteRootUrls((string)file_get_contents($path), $urlBase, $ext);
+        header('Content-Length: ' . strlen($body));
+        echo $body;
+        exit;
+    }
+
+    header('Content-Length: ' . filesize($path));
     readfile($path);
     exit;
 }

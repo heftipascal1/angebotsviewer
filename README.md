@@ -14,7 +14,10 @@ Läuft auf jedem **PHP + MySQL** Webspace (z.B. All-Inkl) — kein Node.js, kein
   „Diese Webseite ist geschützt"); auch als Platzhalter `{typ}` in der Nachricht
 - **Mehrseitige Angebote / Mini-Webseiten:** ZIP mit mehreren HTML-Seiten, Bildern,
   CSS, JS und Schriften hochladen — Unterseiten bleiben untereinander verlinkt
-  und anklickbar, alles hinter derselben Passwort-Abfrage
+  und anklickbar, alles hinter derselben Passwort-Abfrage. Auch exportierte
+  Webseiten mit absoluten Pfaden (`/css/style.css`, `/kontakt/`) funktionieren:
+  solche Pfade werden bei der Auslieferung automatisch auf das Angebot umgebogen,
+  Ordner-Links landen auf der jeweiligen `index.html`
 - **Passwort optional:** mit Passwort muss der Kunde es zuerst eingeben, ohne
   Passwort öffnet der Link das Angebot direkt – getrackt wird in beiden Fällen
 - **Eigene Überschrift** auf der Passwort-Seite pro Angebot (z.B. Firmenname

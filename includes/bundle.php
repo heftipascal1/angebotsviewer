@@ -408,3 +408,92 @@ function bundleVerifyToken(string $slug, string $token): bool {
     $expected = substr(hash_hmac('sha256', $slug . '|' . $exp, APP_SECRET), 0, 32);
     return hash_equals($expected, $sig);
 }
+
+/* =====================================================================
+   Absolute Pfade ("/css/style.css", "/img/foto.webp", "/kontakt/")
+   ---------------------------------------------------------------------
+   Exportierte Webseiten (Astro, Eleventy, WordPress-Export …) verlinken
+   ihre Dateien oft absolut ab der Domain-Wurzel. Im Angebotsviewer würde
+   "/css/style.css" aber auf der Server-Wurzel landen – nicht im Angebot.
+   Deshalb werden solche Pfade bei der Auslieferung von HTML und CSS auf
+   die Angebots-Basis "…/f/{slug}/{token}/" umgeschrieben.
+   ===================================================================== */
+
+/** Schreibt einen einzelnen Wurzel-Pfad um ("/x" -> base + "x"); andere bleiben. */
+function bundleRewriteOneUrl(string $url, string $base): string {
+    $url = trim($url);
+    if ($url === '' || $url[0] !== '/') return $url;      // relativ, absolut (http), mailto, #, data:
+    if (isset($url[1]) && $url[1] === '/') return $url;   // protokoll-relativ (//cdn…)
+    return $base . ltrim($url, '/');
+}
+
+/** srcset-Wert: mehrere Kandidaten "url 900w, url 2x" einzeln umschreiben. */
+function bundleRewriteSrcset(string $value, string $base): string {
+    $parts = array_map('trim', explode(',', $value));
+    foreach ($parts as &$cand) {
+        if ($cand === '') continue;
+        $bits = preg_split('/\s+/', $cand, 2);
+        $bits[0] = bundleRewriteOneUrl($bits[0], $base);
+        $cand = implode(' ', $bits);
+    }
+    unset($cand);
+    return implode(', ', $parts);
+}
+
+/**
+ * Schreibt Wurzel-Pfade in HTML oder CSS auf die Angebots-Basis um.
+ * $base endet mit "/" (z.B. https://domain.de/angebote/f/ab12cd34/tok…/).
+ */
+function bundleRewriteRootUrls(string $content, string $base, string $ext): string {
+    if ($base === '' || substr($base, -1) !== '/') $base .= '/';
+
+    // CSS: url(/pfad), url("/pfad"), url('/pfad') – gilt für .css UND <style>/style="" im HTML
+    $content = preg_replace_callback(
+        '/url\(\s*([\'"]?)(\/(?!\/)[^\'")]*)\1\s*\)/i',
+        fn($m) => 'url(' . $m[1] . bundleRewriteOneUrl($m[2], $base) . $m[1] . ')',
+        $content
+    );
+    // CSS @import "/pfad"
+    $content = preg_replace_callback(
+        '/@import\s+([\'"])(\/(?!\/)[^\'"]*)\1/i',
+        fn($m) => '@import ' . $m[1] . bundleRewriteOneUrl($m[2], $base) . $m[1],
+        $content
+    );
+
+    if ($ext === 'html' || $ext === 'htm') {
+        // Attribute mit einer URL
+        $content = preg_replace_callback(
+            '/\b(href|src|poster|action|formaction|data-src|data-href|data-bg|content)\s*=\s*([\'"])(\/(?!\/)[^\'"]*)\2/i',
+            fn($m) => $m[1] . '=' . $m[2] . bundleRewriteOneUrl($m[3], $base) . $m[2],
+            $content
+        );
+        // Attribute mit mehreren URLs (srcset)
+        $content = preg_replace_callback(
+            '/\b(srcset|data-srcset)\s*=\s*([\'"])([^\'"]*)\2/i',
+            fn($m) => $m[1] . '=' . $m[2] . bundleRewriteSrcset($m[3], $base) . $m[2],
+            $content
+        );
+        // <base href="/"> würde alles wieder auf die Server-Wurzel ziehen -> entfernen
+        $content = preg_replace('/<base\b[^>]*>/i', '', $content);
+    }
+    return $content;
+}
+
+/**
+ * Löst einen angeforderten Pfad innerhalb des Bundles auf eine Datei auf.
+ * Ordner-Links wie "kontakt/" oder "kontakt" landen auf kontakt/index.html,
+ * "kontakt" alternativ auf kontakt.html. Liefert den realen Pfad oder null.
+ */
+function bundleResolveFile(string $base, string $rel): ?string {
+    $rel = trim($rel, '/');
+    $candidates = $rel === ''
+        ? []
+        : [$rel, $rel . '/index.html', $rel . '/index.htm', $rel . '.html', $rel . '.htm'];
+    foreach ($candidates as $cand) {
+        $path = realpath($base . '/' . $cand);
+        if ($path !== false && strpos($path, $base . DIRECTORY_SEPARATOR) === 0 && is_file($path)) {
+            return $path;
+        }
+    }
+    return null;
+}
