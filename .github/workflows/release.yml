@@ -1,20 +1,26 @@
-# Baut bei jedem Tag "vX.Y.Z" automatisch das Update-Paket
-# heftis-angebote-vX.Y.Z.zip und hängt es an ein GitHub-Release.
-# Genau dieses ZIP holt sich der eingebaute Updater (Admin → Update →
-# "Nach Updates suchen") bzw. kann manuell hochgeladen werden.
+# Baut automatisch das Update-Paket heftis-angebote-vX.Y.Z.zip und hängt es
+# an ein GitHub-Release. Genau dieses ZIP holt sich der eingebaute Updater
+# (Admin → Update → "Nach Updates suchen") bzw. kann manuell hochgeladen werden.
 #
-# Neues Release veröffentlichen:
-#   1. APP_VERSION in includes/version.php erhöhen (und ggf. DB_VERSION
-#      + Migration), committen und pushen.
-#   2. git tag v1.7.0 && git push origin v1.7.0
-#   → Der Workflow prüft, dass Tag und APP_VERSION übereinstimmen.
+# Auslöser:
+#   a) Push auf den Standard-Branch: Der Workflow liest APP_VERSION aus
+#      includes/version.php. Gibt es dafür noch kein Release, legt er Tag
+#      und Release an. Gibt es eines schon, passiert nichts.
+#   b) Push eines Tags vX.Y.Z (muss zu APP_VERSION passen).
+#   c) Manuell über "Run workflow" (workflow_dispatch).
+#
+# Neues Release veröffentlichen = einfach APP_VERSION in includes/version.php
+# erhöhen (und ggf. DB_VERSION + Migration), committen, pushen. Fertig.
 
 name: Release-Paket bauen
 
 on:
   push:
+    branches:
+      - '**'
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -26,25 +32,46 @@ jobs:
       - name: Code auschecken
         uses: actions/checkout@v4
 
-      - name: Tag mit APP_VERSION abgleichen
+      - name: Version bestimmen und prüfen, ob ein Release nötig ist
         id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          VERSION="${TAG#v}"
           APP_VERSION=$(sed -n "s/^define('APP_VERSION', '\([^']*\)');.*/\1/p" includes/version.php)
-          echo "Tag: $VERSION · includes/version.php: $APP_VERSION"
-          if [ "$VERSION" != "$APP_VERSION" ]; then
-            echo "::error::Tag $TAG passt nicht zu APP_VERSION $APP_VERSION in includes/version.php"
+          if [ -z "$APP_VERSION" ]; then
+            echo "::error::APP_VERSION in includes/version.php nicht gefunden"
             exit 1
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "zip=heftis-angebote-v$VERSION.zip" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+            if [ "$TAG_VERSION" != "$APP_VERSION" ]; then
+              echo "::error::Tag ${GITHUB_REF_NAME} passt nicht zu APP_VERSION $APP_VERSION in includes/version.php"
+              exit 1
+            fi
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${GITHUB_REF_NAME}" != "${{ github.event.repository.default_branch }}" ]; then
+            echo "Push auf Neben-Branch ${GITHUB_REF_NAME} – kein Release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          TAG="v$APP_VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG existiert bereits – nichts zu tun."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Neues Release: $TAG"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$APP_VERSION" >> "$GITHUB_OUTPUT"
+          echo "zip=heftis-angebote-v$APP_VERSION.zip" >> "$GITHUB_OUTPUT"
 
       - name: PHP-Syntax prüfen
+        if: steps.meta.outputs.skip == 'false'
         run: |
           find . -name '*.php' -not -path './.git/*' -print0 | xargs -0 -n1 php -l > /dev/null
 
       - name: Update-Paket packen
+        if: steps.meta.outputs.skip == 'false'
         run: |
           set -e
           STAGE="$RUNNER_TEMP/heftis-angebote"
@@ -61,9 +88,12 @@ jobs:
           unzip -l "dist/${{ steps.meta.outputs.zip }}" | tail -n 5
 
       - name: Release anlegen und ZIP anhängen
+        if: steps.meta.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" "dist/${{ steps.meta.outputs.zip }}" \
+          # Legt den Tag (falls noch nicht vorhanden) auf dem aktuellen Commit an.
+          gh release create "${{ steps.meta.outputs.tag }}" "dist/${{ steps.meta.outputs.zip }}" \
+            --target "${GITHUB_SHA}" \
             --title "Heftis Angebote ${{ steps.meta.outputs.version }}" \
             --generate-notes
