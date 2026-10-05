@@ -5,6 +5,7 @@ require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/version.php';
 require_once __DIR__ . '/includes/mailer.php';
 require_once __DIR__ . '/includes/bundle.php';
+require_once __DIR__ . '/includes/versions.php';
 
 secureSession();
 
@@ -45,11 +46,22 @@ function grantAccessAndRecordView(PDO $db, array $offer, string $ipHash, string 
     $viewSession = bin2hex(random_bytes(16));
     $ua = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 500);
 
-    $ins = $db->prepare("
-        INSERT INTO offer_views (offer_id, session_hash, ip_hash, user_agent, started_at, last_heartbeat)
-        VALUES (?, ?, ?, ?, NOW(), NOW())
-    ");
-    $ins->execute([$offer['id'], $viewSession, $ipHash, $ua]);
+    // Aufruf der gerade angezeigten Version zuordnen (Spalte ab Schema 7;
+    // vor der Migration fällt der Insert auf die alte Form zurück).
+    $versionId = (int)($offer['current_version_id'] ?? 0);
+    try {
+        $ins = $db->prepare("
+            INSERT INTO offer_views (offer_id, session_hash, ip_hash, user_agent, started_at, last_heartbeat, version_id)
+            VALUES (?, ?, ?, ?, NOW(), NOW(), ?)
+        ");
+        $ins->execute([$offer['id'], $viewSession, $ipHash, $ua, $versionId > 0 ? $versionId : null]);
+    } catch (PDOException $ex) {
+        $ins = $db->prepare("
+            INSERT INTO offer_views (offer_id, session_hash, ip_hash, user_agent, started_at, last_heartbeat)
+            VALUES (?, ?, ?, ?, NOW(), NOW())
+        ");
+        $ins->execute([$offer['id'], $viewSession, $ipHash, $ua]);
+    }
     $newViewId = (int)$db->lastInsertId();
     $_SESSION[$sessionKey . '_view'] = $newViewId;
     // Erlaubte View-IDs dieser Session (für die Tracking-Absicherung)
@@ -109,6 +121,11 @@ if ($hasPassword && $_SERVER['REQUEST_METHOD'] === 'POST') {
 $hasAccess = !empty($_SESSION[$sessionKey]);
 $kind = offerKind($offer);
 $heading = offerHeading($offer);
+try {
+    $curVersion = currentVersion($db, $offer);
+} catch (Throwable $ex) {
+    $curVersion = null;   // Versionsverlauf noch nicht migriert
+}
 
 // ===== Show offer =====
 if ($hasAccess) {
@@ -186,6 +203,9 @@ if ($hasAccess) {
     </div>
     <h1><?= e($heading) ?></h1>
     <p class="sub"><?= e(kindSentence($kind, 'ist geschützt.')) ?> Bitte gib das Passwort ein, das du erhalten hast.</p>
+    <?php if ($curVersion !== null): ?>
+        <p class="sub" style="font-size:.78rem;opacity:.7;margin-top:-.4rem"><?= e(versionLabel($curVersion)) ?></p>
+    <?php endif; ?>
 
     <?php if ($error): ?>
         <div class="alert alert-error"><?= e($error) ?></div>

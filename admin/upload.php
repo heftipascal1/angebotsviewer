@@ -6,6 +6,7 @@ require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/version.php';
 require_once __DIR__ . '/../includes/migrations.php';
 require_once __DIR__ . '/../includes/bundle.php';
+require_once __DIR__ . '/../includes/versions.php';
 requireAdmin();
 
 $db = getDB();
@@ -86,6 +87,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $entryFile,
                 ]);
                 $createdLink = BASE_URL . 'a/' . $slug;
+
+                // Version 1 im Versionsverlauf anlegen
+                $offerId = (int)$db->lastInsertId();
+                $versionId = createVersion($db, $offerId, 1, $bundleType, $storedName, $entryFile, $file['name']);
+                $db->prepare("UPDATE offers SET current_version_id = ? WHERE id = ?")->execute([$versionId, $offerId]);
 
                 // Mehrseitig? Prüfen, welcher Auslieferungs-Weg auf diesem
                 // Server funktioniert (mod_rewrite oder PATH_INFO).

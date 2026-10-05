@@ -6,6 +6,7 @@ require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/version.php';
 require_once __DIR__ . '/../includes/migrations.php';
 require_once __DIR__ . '/../includes/bundle.php';
+require_once __DIR__ . '/../includes/versions.php';
 requireAdmin();
 
 $db = getDB();
@@ -23,8 +24,34 @@ if (!$offer) {
 
 $error = '';
 $success = '';
+if (($_GET['msg'] ?? '') !== '') $success = (string)$_GET['msg'];
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+// ===== Versionsverlauf: Version anzeigen / löschen =====
+$action = $_POST['action'] ?? '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array($action, ['activate_version', 'delete_version'], true)) {
+    verifyCsrf();
+    $versionId = (int)($_POST['version_id'] ?? 0);
+    if ($action === 'activate_version') {
+        $v = versionById($db, $id, $versionId);
+        if ($v !== null && activateVersion($db, $id, $versionId)) {
+            if ($v['bundle_type'] === 'bundle') {
+                bundleDetectDelivery($db, $offer['slug'], (string)$v['entry_file']);
+            }
+            header('Location: edit.php?id=' . $id . '&msg=' . rawurlencode('Version ' . (int)$v['version_no'] . ' wird jetzt angezeigt.'));
+            exit;
+        }
+        $error = 'Version nicht gefunden.';
+    } else {
+        $err = deleteVersion($db, $offer, $versionId);
+        if ($err === null) {
+            header('Location: edit.php?id=' . $id . '&msg=' . rawurlencode('Version gelöscht.'));
+            exit;
+        }
+        $error = $err;
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === '') {
     verifyCsrf();
 
     $title = trim($_POST['title'] ?? '');
@@ -84,17 +111,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($newEntry !== ''
             && ($offer['bundle_type'] ?? 'single') === 'bundle'
             && $newEntry !== ($offer['entry_file'] ?? '')
-            && in_array($newEntry, bundleListPages($offer['slug']), true)) {
+            && in_array($newEntry, bundleListPages((string)$offer['filename']), true)) {
             $db->prepare("UPDATE offers SET entry_file = ? WHERE id = ?")->execute([$newEntry, $id]);
+            if (!empty($offer['current_version_id'])) {
+                $db->prepare("UPDATE offer_versions SET entry_file = ? WHERE id = ?")->execute([$newEntry, (int)$offer['current_version_id']]);
+            }
             $changes[] = 'Startseite geändert';
         }
 
-        // 3) Inhalt austauschen (optional) — gleicher Slug, dadurch bleiben
-        //    Link UND Statistik erhalten. HTML <-> ZIP ist beliebig wechselbar.
+        // 3) Neuer Inhalt (optional) — wird als NEUE VERSION abgelegt und sofort
+        //    angezeigt. Ältere Versionen bleiben erhalten und lassen sich
+        //    jederzeit wieder anzeigen. Link, Passwort und Statistik bleiben.
         if (isset($_FILES['htmlfile']) && $_FILES['htmlfile']['error'] === UPLOAD_ERR_OK) {
             $file = $_FILES['htmlfile'];
             $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-            $wasBundle = (($offer['bundle_type'] ?? 'single') === 'bundle');
+            $versionNote = (string)($_POST['version_note'] ?? '');
+            $versionNo = nextVersionNo($db, $id);
+            $storageKey = versionStorageKey($offer['slug'], $versionNo);
 
             if (!in_array($ext, ['html', 'htm', 'zip'], true)) {
                 $error = 'Nur HTML-Dateien (.html, .htm) oder ein ZIP-Archiv (.zip) sind erlaubt.';
@@ -103,30 +136,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ? 'Das ZIP darf maximal 60 MB groß sein.'
                     : 'Die Datei darf maximal 10 MB groß sein.';
             } elseif ($ext === 'zip') {
-                $res = bundleExtract($file['tmp_name'], $offer['slug']);
+                $res = bundleExtract($file['tmp_name'], $storageKey);
                 if ($res['ok']) {
-                    $db->prepare("UPDATE offers SET original_filename = ?, filename = ?, bundle_type = 'bundle', entry_file = ? WHERE id = ?")
-                       ->execute([$file['name'], $offer['slug'], $res['entry'], $id]);
-                    // War es vorher eine Einzeldatei? Die wird nicht mehr gebraucht.
-                    if (!$wasBundle) {
-                        $oldFile = __DIR__ . '/../uploads/' . basename($offer['filename']);
-                        if (is_file($oldFile)) @unlink($oldFile);
-                    }
-                    $changes[] = 'Mehrseitiges Angebot ersetzt (' . (int)$res['files'] . ' Dateien, Start: ' . $res['entry'] . ')';
+                    $vid = createVersion($db, $id, $versionNo, 'bundle', $storageKey, $res['entry'], $file['name'], $versionNote);
+                    activateVersion($db, $id, $vid);
+                    $changes[] = 'Version ' . $versionNo . ' angelegt und angezeigt (mehrseitig, ' . (int)$res['files'] . ' Dateien, Start: ' . $res['entry'] . ')';
                     bundleDetectDelivery($db, $offer['slug'], (string)$res['entry']);
                 } else {
                     $error = $res['error'];
                 }
             } else {
-                $storedName = $wasBundle ? $offer['slug'] . '.html' : $offer['filename'];
+                $storedName = $storageKey . '.html';
                 $targetPath = __DIR__ . '/../uploads/' . basename($storedName);
                 if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-                    $db->prepare("UPDATE offers SET original_filename = ?, filename = ?, bundle_type = 'single', entry_file = NULL WHERE id = ?")
-                       ->execute([$file['name'], $storedName, $id]);
-                    if ($wasBundle) {
-                        bundleDeleteDir(bundleDir($offer['slug']));
-                    }
-                    $changes[] = 'HTML-Datei ausgetauscht';
+                    $vid = createVersion($db, $id, $versionNo, 'single', $storedName, null, $file['name'], $versionNote);
+                    activateVersion($db, $id, $vid);
+                    $changes[] = 'Version ' . $versionNo . ' angelegt und angezeigt (HTML-Datei)';
                 } else {
                     $error = 'Die neue Datei konnte nicht gespeichert werden (Schreibrechte im uploads-Ordner prüfen).';
                 }
@@ -156,7 +181,9 @@ if ($isBundle) {
     }
     $deliveryMode = getSetting($db, 'bundle_delivery', null);
 }
-$pages     = $isBundle ? bundleListPages($offer['slug']) : [];
+$pages     = $isBundle ? bundleListPages((string)$offer['filename']) : [];
+$versions  = versionsForOffer($db, $id);
+$currentVersionId = (int)($offer['current_version_id'] ?? 0);
 ?>
 <!DOCTYPE html>
 <html lang="de">
@@ -275,26 +302,92 @@ $pages     = $isBundle ? bundleListPages($offer['slug']) : [];
             <?php endif; ?>
 
             <div class="form-group">
-                <label>Inhalt austauschen (HTML oder ZIP)</label>
+                <label>Neue Version hochladen (HTML oder ZIP)</label>
                 <div class="file-drop" id="fileDrop">
                     <input type="file" name="htmlfile" id="htmlfile" accept=".html,.htm,.zip">
                     <div class="file-label">Neue Datei hierher ziehen oder klicken (optional)</div>
                     <div class="file-name" id="fileName"></div>
                 </div>
+                <input type="text" name="version_note" maxlength="200" placeholder="Was ist neu? (optional, z.B. „Preise angepasst")" style="margin-top:.6rem">
                 <p class="form-hint">
-                    Aktuell: <strong><?= e($offer['original_filename']) ?></strong>
+                    Aktuell angezeigt: <strong><?= e($offer['original_filename']) ?></strong>
                     <?php if ($isBundle): ?>
                         — mehrseitiges Angebot mit <?= count($pages) ?> Seite(n), Start: <code><?= e((string)($offer['entry_file'] ?? '')) ?></code>
                     <?php else: ?>
                         — einzelne HTML-Seite
                     <?php endif; ?>.<br>
                     Du kannst jederzeit zwischen einzelner HTML-Datei und ZIP (mehrere Seiten) wechseln.
-                    Beim Austausch bleiben Link, Passwort und alle bisherigen Statistiken erhalten.
+                    Der neue Inhalt wird als <strong>neue Version</strong> gespeichert und sofort angezeigt;
+                    ältere Versionen bleiben unten im Verlauf erhalten. Link, Passwort und Statistik bleiben gleich.
                 </p>
             </div>
 
             <button type="submit" class="btn btn-primary btn-full">Änderungen speichern</button>
         </form>
+    </div>
+
+    <div class="card">
+        <div class="card-header"><h2>Versionsverlauf</h2></div>
+        <?php if (empty($versions)): ?>
+            <p class="form-hint">Für dieses Angebot gibt es noch keine Versionsdaten. Beim nächsten Hochladen eines neuen Inhalts beginnt der Verlauf.</p>
+        <?php else: ?>
+            <p class="form-hint" style="margin-bottom:1rem">
+                Der Kunde sieht immer die <strong>angezeigte</strong> Version (standardmäßig die neueste).
+                Mit „Anzeigen" schaltest du auf eine andere Version um – der Link bleibt derselbe.
+            </p>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Version</th>
+                            <th>Stand</th>
+                            <th>Datei</th>
+                            <th>Hinweis</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($versions as $v): $isCurrent = (int)$v['id'] === $currentVersionId; ?>
+                        <tr<?= $isCurrent ? '' : ' style="opacity:.7"' ?>>
+                            <td><strong>Version <?= (int)$v['version_no'] ?></strong></td>
+                            <td><?= date('d.m.Y H:i', strtotime($v['created_at'])) ?></td>
+                            <td>
+                                <?= e((string)$v['original_filename']) ?>
+                                <span style="font-size:.75rem;color:var(--text-muted)">
+                                    · <?= $v['bundle_type'] === 'bundle' ? 'mehrseitig' . (!empty($v['entry_file']) ? ', Start: ' . e((string)$v['entry_file']) : '') : 'einzelne HTML-Seite' ?>
+                                </span>
+                            </td>
+                            <td><?= $v['note'] !== null && $v['note'] !== '' ? e((string)$v['note']) : '<span style="color:var(--text-muted)">–</span>' ?></td>
+                            <td>
+                                <?php if ($isCurrent): ?>
+                                    <span class="badge badge-active">Wird angezeigt</span>
+                                <?php else: ?>
+                                    <span class="badge badge-inactive">Nicht aktiv</span>
+                                <?php endif; ?>
+                            </td>
+                            <td style="white-space:nowrap">
+                                <?php if (!$isCurrent): ?>
+                                    <form method="post" style="display:inline">
+                                        <?= csrfField() ?>
+                                        <input type="hidden" name="action" value="activate_version">
+                                        <input type="hidden" name="version_id" value="<?= (int)$v['id'] ?>">
+                                        <button type="submit" class="btn btn-primary btn-sm">Anzeigen</button>
+                                    </form>
+                                    <form method="post" style="display:inline" onsubmit="return confirm('Version <?= (int)$v['version_no'] ?> endgültig löschen?')">
+                                        <?= csrfField() ?>
+                                        <input type="hidden" name="action" value="delete_version">
+                                        <input type="hidden" name="version_id" value="<?= (int)$v['id'] ?>">
+                                        <button type="submit" class="btn btn-ghost btn-sm">Löschen</button>
+                                    </form>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
     </div>
 </div>
 

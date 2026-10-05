@@ -25,7 +25,9 @@ $pathInfo = (string)($_SERVER['PATH_INFO'] ?? '');
 $slugRaw  = (string)($_GET['slug'] ?? '');
 $relRaw   = (string)($_GET['p'] ?? '');
 
-if ($pathInfo !== '') {
+// PATH_INFO nur auswerten, wenn kein expliziter slug-Parameter kommt
+// (manche Server setzen PATH_INFO zusätzlich zur Rewrite-Query).
+if ($pathInfo !== '' && $slugRaw === '') {
     $parts   = explode('/', ltrim($pathInfo, '/'), 2);
     $slugRaw = $parts[0];
     $relRaw  = $parts[1] ?? '';
@@ -82,7 +84,8 @@ if (!$hasToken && empty($_SESSION[$sessionKey])) {
 }
 
 if ($isBundle) {
-    $base = realpath(bundleDir($slug));
+    // Ordner der gerade angezeigten Version (offers.filename = Ordnername)
+    $base = realpath(bundleDir((string)$offer['filename']));
     if ($base === false) {
         http_response_code(404);
         exit;

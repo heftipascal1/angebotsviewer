@@ -4,6 +4,7 @@ require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/bundle.php';
+require_once __DIR__ . '/../includes/versions.php';
 require_once __DIR__ . '/../includes/version.php';
 require_once __DIR__ . '/../includes/migrations.php';
 requireAdmin();
@@ -24,13 +25,8 @@ if (!$offer) {
 // Handle deletion
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete') {
     verifyCsrf();
-    // soft-delete + Dateien entfernen (Einzeldatei oder ganzer Bundle-Ordner)
-    if (($offer['bundle_type'] ?? 'single') === 'bundle') {
-        bundleDeleteDir(bundleDir($offer['slug']));
-    } else {
-        $filePath = __DIR__ . '/../uploads/' . basename($offer['filename']);
-        if (is_file($filePath)) @unlink($filePath);
-    }
+    // soft-delete + Dateien aller Versionen entfernen
+    deleteAllVersions($db, $offer);
     $db->prepare("UPDATE offers SET is_active = 0 WHERE id = ?")->execute([$id]);
     header('Location: index.php');
     exit;
@@ -50,16 +46,31 @@ $stmt = $db->prepare("
 $stmt->execute([$id]);
 $stats = $stmt->fetch();
 
-// Recent individual views
+// Recent individual views (mit Versionsnummer)
 $stmt = $db->prepare("
-    SELECT started_at, duration_seconds, ip_hash, user_agent
-    FROM offer_views
-    WHERE offer_id = ?
-    ORDER BY started_at DESC
+    SELECT vw.started_at, vw.duration_seconds, vw.ip_hash, vw.user_agent, ver.version_no
+    FROM offer_views vw
+    LEFT JOIN offer_versions ver ON ver.id = vw.version_id
+    WHERE vw.offer_id = ?
+    ORDER BY vw.started_at DESC
     LIMIT 100
 ");
 $stmt->execute([$id]);
 $views = $stmt->fetchAll();
+
+// Aufrufe pro Version
+$stmt = $db->prepare("
+    SELECT ver.id, ver.version_no, ver.created_at, ver.note, ver.original_filename,
+           COUNT(vw.id) AS cnt, COUNT(DISTINCT vw.ip_hash) AS uniq
+    FROM offer_versions ver
+    LEFT JOIN offer_views vw ON vw.version_id = ver.id
+    WHERE ver.offer_id = ?
+    GROUP BY ver.id, ver.version_no, ver.created_at, ver.note, ver.original_filename
+    ORDER BY ver.version_no DESC
+");
+$stmt->execute([$id]);
+$versionStats = $stmt->fetchAll();
+$currentVersionId = (int)($offer['current_version_id'] ?? 0);
 
 // Views per day (last 14 days)
 $stmt = $db->prepare("
@@ -172,6 +183,39 @@ $offerMessage = renderOfferMessage($tpl, [
         </div>
     </div>
 
+    <?php if (!empty($versionStats)): ?>
+    <div class="card">
+        <div class="card-header"><h2>Aufrufe pro Version</h2></div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Version</th>
+                        <th>Stand</th>
+                        <th>Hinweis</th>
+                        <th>Aufrufe</th>
+                        <th>Unique</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($versionStats as $vs): ?>
+                    <tr>
+                        <td><strong>Version <?= (int)$vs['version_no'] ?></strong> <span style="font-size:.75rem;color:var(--text-muted)">· <?= e((string)$vs['original_filename']) ?></span></td>
+                        <td><?= date('d.m.Y', strtotime($vs['created_at'])) ?></td>
+                        <td><?= $vs['note'] !== null && $vs['note'] !== '' ? e((string)$vs['note']) : '<span style="color:var(--text-muted)">–</span>' ?></td>
+                        <td><?= (int)$vs['cnt'] ?></td>
+                        <td><?= (int)$vs['uniq'] ?></td>
+                        <td><?= (int)$vs['id'] === $currentVersionId ? '<span class="badge badge-active">Wird angezeigt</span>' : '<span class="badge badge-inactive">Nicht aktiv</span>' ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        <p class="form-hint" style="margin-top:.8rem">Welche Version angezeigt wird, stellst du unter <a href="edit.php?id=<?= $id ?>" style="color:var(--primary)">Bearbeiten</a> ein.</p>
+    </div>
+    <?php endif; ?>
+
     <div class="card">
         <div class="card-header"><h2>Einzelne Aufrufe</h2></div>
         <?php if (empty($views)): ?>
@@ -186,6 +230,7 @@ $offerMessage = renderOfferMessage($tpl, [
                             <th>Gerät</th>
                             <th>System</th>
                             <th>Browser</th>
+                            <th>Version</th>
                             <th>Besucher</th>
                         </tr>
                     </thead>
@@ -197,6 +242,7 @@ $offerMessage = renderOfferMessage($tpl, [
                             <td><?= e($ua['device']) ?></td>
                             <td><?= e($ua['os']) ?></td>
                             <td><?= e($ua['browser']) ?></td>
+                            <td><?= !empty($v['version_no']) ? 'V' . (int)$v['version_no'] : '<span style="color:var(--text-muted)">–</span>' ?></td>
                             <td><span style="font-family:monospace;font-size:.75rem;color:var(--text-muted)">#<?= substr($v['ip_hash'], 0, 8) ?></span></td>
                         </tr>
                     <?php endforeach; ?>

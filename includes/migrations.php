@@ -134,6 +134,54 @@ function migrations(): array {
                 $db->exec("ALTER TABLE offers ADD COLUMN is_archived TINYINT(1) NOT NULL DEFAULT 0");
             }
         },
+
+        // v1.8.0: Versionsverlauf pro Angebot. Bestehende Angebote bekommen
+        // ihre aktuelle Datei als "Version 1" – die Dateien bleiben, wo sie sind.
+        7 => function (PDO $db) {
+            if (!tableExists($db, 'offer_versions')) {
+                $db->exec("
+                    CREATE TABLE offer_versions (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        offer_id INT NOT NULL,
+                        version_no INT NOT NULL,
+                        bundle_type VARCHAR(16) NOT NULL DEFAULT 'single',
+                        filename VARCHAR(255) NOT NULL,
+                        entry_file VARCHAR(255) NULL DEFAULT NULL,
+                        original_filename VARCHAR(255) NULL DEFAULT NULL,
+                        note VARCHAR(200) NULL DEFAULT NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE KEY uniq_offer_version (offer_id, version_no),
+                        KEY idx_offer (offer_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                ");
+            }
+            if (!columnExists($db, 'offers', 'current_version_id')) {
+                $db->exec("ALTER TABLE offers ADD COLUMN current_version_id INT NULL DEFAULT NULL");
+            }
+            if (!columnExists($db, 'offer_views', 'version_id')) {
+                $db->exec("ALTER TABLE offer_views ADD COLUMN version_id INT NULL DEFAULT NULL");
+            }
+            // Bestand übernehmen: jede vorhandene Datei wird Version 1
+            $db->exec("
+                INSERT INTO offer_versions (offer_id, version_no, bundle_type, filename, entry_file, original_filename, created_at)
+                SELECT o.id, 1, COALESCE(o.bundle_type, 'single'), o.filename, o.entry_file, o.original_filename, o.created_at
+                FROM offers o
+                WHERE NOT EXISTS (SELECT 1 FROM offer_versions v WHERE v.offer_id = o.id)
+            ");
+            $db->exec("
+                UPDATE offers o
+                JOIN offer_versions v ON v.offer_id = o.id AND v.version_no = 1
+                SET o.current_version_id = v.id
+                WHERE o.current_version_id IS NULL
+            ");
+            // Bisherige Aufrufe der Version 1 zuordnen
+            $db->exec("
+                UPDATE offer_views vw
+                JOIN offers o ON o.id = vw.offer_id
+                SET vw.version_id = o.current_version_id
+                WHERE vw.version_id IS NULL AND o.current_version_id IS NOT NULL
+            ");
+        },
     ];
 }
 

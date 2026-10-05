@@ -37,7 +37,9 @@ $allOffers = $db->query("
            COUNT(v.id) AS view_count,
            COUNT(DISTINCT v.ip_hash) AS unique_views,
            MAX(v.started_at) AS last_viewed,
-           COALESCE(AVG(NULLIF(v.duration_seconds, 0)), 0) AS avg_duration
+           COALESCE(AVG(NULLIF(v.duration_seconds, 0)), 0) AS avg_duration,
+           (SELECT version_no FROM offer_versions cv WHERE cv.id = o.current_version_id) AS current_version_no,
+           (SELECT COUNT(*) FROM offer_versions av WHERE av.offer_id = o.id) AS version_count
     FROM offers o
     LEFT JOIN offer_views v ON v.offer_id = o.id
     WHERE o.is_active = 1
@@ -189,6 +191,9 @@ $messageTemplate = getSetting($db, 'message_template', '') ?: defaultMessageTemp
                                 <?php endif; ?>
                                 <?php if (!offerHasPassword($o)): ?>
                                     <span style="font-size:.7rem;color:var(--text-muted)"> · ohne Passwort</span>
+                                <?php endif; ?>
+                                <?php if (!empty($o['current_version_no'])): ?>
+                                    <span style="font-size:.7rem;color:var(--text-muted)"> · Version <?= (int)$o['current_version_no'] ?><?= (int)$o['version_count'] > 1 ? ' von ' . (int)$o['version_count'] : '' ?></span>
                                 <?php endif; ?>
                             </td>
                             <td>

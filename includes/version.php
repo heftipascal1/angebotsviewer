@@ -10,8 +10,8 @@
  *                spielt NUR ZIPs mit passendem Dateinamen ein.
  * UPDATE_GITHUB_REPO = GitHub-Repo, dessen Releases als Update-Quelle dienen.
  */
-define('APP_VERSION', '1.7.1');
-define('DB_VERSION', 6);
+define('APP_VERSION', '1.8.0');
+define('DB_VERSION', 7);
 define('BRAND_NAME', 'Heftis Angebote');
 define('UPDATE_ZIP_PATTERN', '/^heftis-angebote-v\d+\.\d+\.\d+\.zip$/i');
 // GitHub-Repository (owner/repo), aus dessen Releases der Updater neue

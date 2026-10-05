@@ -35,9 +35,13 @@ Läuft auf jedem **PHP + MySQL** Webspace (z.B. All-Inkl) — kein Node.js, kein
   - **Gerätetyp** (Desktop / Mobil / Tablet)
   - Balkendiagramm der letzten 14 Tage
 - DSGVO-freundlich: **keine Klartext-IP** gespeichert, nur ein anonymer Hash
-- **Angebot bearbeiten:** Titel & Passwort ändern, **Inhalt austauschen**
-  (HTML ⇄ ZIP jederzeit wechselbar), Startseite eines mehrseitigen Angebots wählen —
-  Link und bisherige Statistik bleiben dabei erhalten
+- **Angebot bearbeiten:** Titel & Passwort ändern, Startseite eines mehrseitigen
+  Angebots wählen — Link und bisherige Statistik bleiben dabei erhalten
+- **Versionsverlauf:** Jeder neu hochgeladene Inhalt (HTML ⇄ ZIP jederzeit
+  wechselbar) wird eine neue Version. Du bestimmst, welche Version der Kunde
+  gerade sieht (Standard: die neueste), kannst jederzeit auf eine ältere
+  zurückschalten und siehst in der Statistik die Aufrufe pro Version. Der Kunde
+  sieht auf der Passwort-Seite „Version N · Stand Datum"
 - **Sicheres Update-System:** Updates direkt aus GitHub-Releases, per
   ZIP-Upload im Admin oder per FTP einspielen – ohne bestehende
   Angebote/Statistiken zu verlieren (DB-Migrationen sind additiv)
