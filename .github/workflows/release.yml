@@ -1,4 +1,4 @@
-# Baut automatisch das Update-Paket heftis-angebote-vX.Y.Z.zip und hängt es
+# Baut automatisch das Update-Paket angebotsviewer-vX.Y.Z.zip und hängt es
 # an ein GitHub-Release. Genau dieses ZIP holt sich der eingebaute Updater
 # (Admin → Update → "Nach Updates suchen") bzw. kann manuell hochgeladen werden.
 #
@@ -63,7 +63,9 @@ jobs:
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$APP_VERSION" >> "$GITHUB_OUTPUT"
-          echo "zip=heftis-angebote-v$APP_VERSION.zip" >> "$GITHUB_OUTPUT"
+          echo "zip=angebotsviewer-v$APP_VERSION.zip" >> "$GITHUB_OUTPUT"
+          # Alter Paketname – damit Installationen bis 1.8.0 das Update noch finden
+          echo "zip_legacy=heftis-angebote-v$APP_VERSION.zip" >> "$GITHUB_OUTPUT"
 
       - name: PHP-Syntax prüfen
         if: steps.meta.outputs.skip == 'false'
@@ -74,7 +76,7 @@ jobs:
         if: steps.meta.outputs.skip == 'false'
         run: |
           set -e
-          STAGE="$RUNNER_TEMP/heftis-angebote"
+          STAGE="$RUNNER_TEMP/angebotsviewer"
           rm -rf "$STAGE" && mkdir -p "$STAGE"
           # Alles außer Git/CI-Dateien, lokaler Konfiguration und Upload-Inhalten
           rsync -a ./ "$STAGE/" \
@@ -84,7 +86,8 @@ jobs:
           mkdir -p "$STAGE/uploads"
           cp uploads/.htaccess uploads/.gitkeep "$STAGE/uploads/"
           mkdir -p dist
-          (cd "$RUNNER_TEMP" && zip -qr "$GITHUB_WORKSPACE/dist/${{ steps.meta.outputs.zip }}" heftis-angebote)
+          (cd "$RUNNER_TEMP" && zip -qr "$GITHUB_WORKSPACE/dist/${{ steps.meta.outputs.zip }}" angebotsviewer)
+          cp "dist/${{ steps.meta.outputs.zip }}" "dist/${{ steps.meta.outputs.zip_legacy }}"
           unzip -l "dist/${{ steps.meta.outputs.zip }}" | tail -n 5
 
       - name: Release anlegen und ZIP anhängen
@@ -93,7 +96,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Legt den Tag (falls noch nicht vorhanden) auf dem aktuellen Commit an.
-          gh release create "${{ steps.meta.outputs.tag }}" "dist/${{ steps.meta.outputs.zip }}" \
+          gh release create "${{ steps.meta.outputs.tag }}" \
+            "dist/${{ steps.meta.outputs.zip }}" "dist/${{ steps.meta.outputs.zip_legacy }}" \
             --target "${GITHUB_SHA}" \
-            --title "Heftis Angebote ${{ steps.meta.outputs.version }}" \
+            --title "Angebotsviewer ${{ steps.meta.outputs.version }}" \
             --generate-notes

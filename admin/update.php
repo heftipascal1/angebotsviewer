@@ -36,7 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'uploa
         // *** Sicherheits-Gate: NUR bei korrektem Dateinamen updaten ***
         if (!validateUpdateZipName($origName)) {
             $error = 'Update abgelehnt: Falscher Dateiname „' . $origName . '". '
-                   . 'Erlaubt ist nur ein Paket wie z.B. heftis-angebote-v1.2.0.zip.';
+                   . 'Erlaubt ist nur ein Paket wie z.B. ' . UPDATE_PACKAGE_NAME . '-v1.8.1.zip.';
         } else {
             $uploadResult = applyUpdateZip($_FILES['zip']['tmp_name'], $appRoot);
             if (empty($uploadResult['errors'])) {
@@ -194,7 +194,7 @@ $installerPresent = is_file(__DIR__ . '/../install.php');
         <p class="form-hint" style="margin-bottom:1rem">
             Lade hier das neue Update-Paket hoch. Aus Sicherheitsgründen wird das Update
             <strong>nur akzeptiert, wenn der Dateiname stimmt</strong>
-            (Format: <code>heftis-angebote-vX.Y.Z.zip</code>).
+            (Format: <code><?= e(UPDATE_PACKAGE_NAME) ?>-vX.Y.Z.zip</code>).
             <code>config.php</code> und deine Angebote in <code>uploads/</code> werden dabei
             <strong>niemals</strong> überschrieben.
         </p>

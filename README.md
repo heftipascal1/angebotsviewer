@@ -1,4 +1,4 @@
-# Heftis Angebote
+# Angebotsviewer („Heftis Angebote")
 
 Ein schlankes Tool zum Hochladen passwortgeschützter HTML-Angebote mit
 vollständigem Aufruf-Tracking (Anzahl, Zeitpunkt, Verweildauer, Gerät).
@@ -71,7 +71,7 @@ Voraussetzung: der Webspace darf per PHP ins Internet (curl oder
 
 ### Weg 2: ZIP-Upload im Admin
 
-Das Paket `heftis-angebote-vX.Y.Z.zip` von der GitHub-Release-Seite laden und
+Das Paket `angebotsviewer-vX.Y.Z.zip` von der GitHub-Release-Seite laden und
 im Admin unter „Update" hochladen. Es werden nur ZIPs mit passendem Namen und
 internem Marker akzeptiert.
 
@@ -98,7 +98,9 @@ bestehenden Angebote/Aufrufe zur Kontrolle.
    Migration ergänzen.
 2. Committen und auf den Standard-Branch pushen.
 3. Die GitHub-Action `.github/workflows/release.yml` liest die Version, baut
-   `heftis-angebote-vX.Y.Z.zip`, legt Tag und Release an und hängt das ZIP an.
+   `angebotsviewer-vX.Y.Z.zip`, legt Tag und Release an und hängt das ZIP an
+   (übergangsweise zusätzlich als `heftis-angebote-vX.Y.Z.zip`, damit ältere
+   Installationen das Update noch finden).
    Existiert für die Version schon ein Release, passiert nichts. Ab dann
    finden es installierte Versionen über „Nach Updates suchen".
    Alternativ lässt sich der Workflow unter „Actions" auch manuell starten.

@@ -4,7 +4,7 @@
  *
  * Sicherheitsregeln:
  *  - Es wird NUR aktualisiert, wenn der ZIP-Dateiname exakt zum erlaubten
- *    Muster passt (UPDATE_ZIP_PATTERN, z.B. heftis-angebote-v1.2.0.zip).
+ *    Muster passt (UPDATE_ZIP_PATTERN, z.B. angebotsviewer-v1.8.1.zip).
  *  - Das ZIP muss den Marker includes/version.php enthalten (kein Fremd-ZIP).
  *  - config.php, install.php und der komplette uploads/-Ordner werden
  *    NIEMALS überschrieben → bestehende Angebote & Zugangsdaten bleiben sicher.
@@ -167,15 +167,17 @@ function githubFetchRelease(?string $tag = null): array {
     if (!is_array($rel) || empty($rel['tag_name'])) {
         return ['error' => 'Unerwartete Antwort von GitHub.'];
     }
+    // Passendes Paket suchen – bevorzugt mit dem aktuellen Namen (UPDATE_PACKAGE_NAME).
     $asset = null;
     foreach ($rel['assets'] ?? [] as $a) {
-        if (!empty($a['name']) && validateUpdateZipName($a['name']) && !empty($a['browser_download_url'])) {
+        if (empty($a['name']) || !validateUpdateZipName($a['name']) || empty($a['browser_download_url'])) continue;
+        if ($asset === null || stripos($a['name'], UPDATE_PACKAGE_NAME . '-') === 0) {
             $asset = $a;
-            break;
+            if (stripos($a['name'], UPDATE_PACKAGE_NAME . '-') === 0) break;
         }
     }
     if ($asset === null) {
-        return ['error' => 'Das Release ' . $rel['tag_name'] . ' enthält kein Update-Paket (heftis-angebote-vX.Y.Z.zip).'];
+        return ['error' => 'Das Release ' . $rel['tag_name'] . ' enthält kein Update-Paket (' . UPDATE_PACKAGE_NAME . '-vX.Y.Z.zip).'];
     }
     return [
         'tag'        => (string)$rel['tag_name'],
