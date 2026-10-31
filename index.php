@@ -1,4 +1,9 @@
 <?php
+// Noch nicht installiert? Dann direkt zum Installer statt Fehlerseite.
+if (!is_file(__DIR__ . '/config.php')) {
+    header('Location: install.php');
+    exit;
+}
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/auth.php';
@@ -6,7 +11,7 @@ require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/version.php';
 
 if (isAdminLoggedIn()) {
-    header('Location: ' . BASE_URL . 'admin/');
+    header('Location: ' . BASE_URL . 'admin/index.php');
     exit;
 }
 
@@ -25,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             secureSession();
             $_SESSION['admin_logged_in'] = true;
             session_regenerate_id(true);
-            header('Location: ' . BASE_URL . 'admin/');
+            header('Location: ' . BASE_URL . 'admin/index.php');
             exit;
         }
         throttleFail($db, $ipHash, 'admin');

@@ -2,6 +2,10 @@
 
 Options -Indexes
 
+# Startdatei für Ordner-Adressen (…/ und …/admin/). Ohne diese Zeile liefern
+# manche Server "403 Forbidden" statt der Login-Seite bzw. des Dashboards.
+DirectoryIndex index.php index.html
+
 <IfModule mod_rewrite.c>
     RewriteEngine On
 

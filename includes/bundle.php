@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/security.php';
 /**
  * Mehrseitige Angebote / Mini-Webseiten (ZIP-Upload).
  *
@@ -83,6 +84,7 @@ function bundleDir(string $slug): string {
 function bundleSafeRelPath(string $path): ?string {
     $path = str_replace('\\', '/', $path);
     if ($path === '' || substr($path, -1) === '/') return null;      // Ordner
+    if (preg_match('/[\x00-\x1f\x7f]/', $path)) return null;        // Steuerzeichen
     if ($path[0] === '/' || preg_match('#^[a-z]:/#i', $path)) return null; // absolut
     if (strpos($path, "\0") !== false) return null;
 
@@ -93,6 +95,7 @@ function bundleSafeRelPath(string $path): ?string {
         if ($seg[0] === '.') return null;                            // .DS_Store, .htaccess, …
         if ($seg === '__MACOSX') return null;
         if (strlen($seg) > 120) return null;
+        if (uploadNameIsDangerous($seg)) return null;                // z.B. "bild.php.png"
         $parts[] = $seg;
     }
     if (!$parts || count($parts) > 12) return null;
@@ -204,6 +207,14 @@ function bundleExtract(string $zipPath, string $slug): array {
         $rel = bundleSafeRelPath($stat['name']);
         if ($rel === null) { $skipped++; continue; }
 
+        // Symbolische Links (könnten auf Dateien ausserhalb zeigen) nie übernehmen
+        if ($zip->getExternalAttributesIndex($i, $opsys, $attr)
+            && $opsys === ZipArchive::OPSYS_UNIX
+            && ((($attr >> 16) & 0170000) === 0120000)) {
+            $skipped++;
+            continue;
+        }
+
         if ($stat['size'] > BUNDLE_MAX_FILE_BYTES) {
             $zip->close();
             return ['ok' => false, 'error' => 'Die Datei "' . $rel . '" im ZIP ist zu groß (max. 30 MB pro Datei).'];
@@ -236,7 +247,11 @@ function bundleExtract(string $zipPath, string $slug): array {
         return ['ok' => false, 'error' => 'Im ZIP ist keine HTML-Seite enthalten. Bitte ein Archiv mit index.html hochladen.'];
     }
 
-    // 2) Durchgang: in temporären Ordner entpacken, dann atomar tauschen
+    // 2) Durchgang: in temporären Ordner entpacken, dann atomar tauschen.
+    //    Die Grössenangaben im ZIP könnten gefälscht sein (ZIP-Bombe) – deshalb
+    //    wird beim Schreiben hart begrenzt und bei Überschreitung abgebrochen.
+    ensureUploadsProtection();
+    $written = 0;
     $target = bundleDir($slug);
     $tmp    = $target . '.new';
     bundleDeleteDir($tmp);
@@ -262,9 +277,25 @@ function bundleExtract(string $zipPath, string $slug): array {
             $zip->close();
             return ['ok' => false, 'error' => 'Die Datei "' . $rel . '" konnte nicht gespeichert werden.'];
         }
-        stream_copy_to_stream($stream, $out);
+        $declared = (int)$zip->statIndex($i)['size'];
+        $limit    = min(BUNDLE_MAX_FILE_BYTES, BUNDLE_MAX_TOTAL_BYTES - $written);
+        $copied   = 0;
+        $tooBig   = false;
+        while (!feof($stream)) {
+            $chunk = fread($stream, 65536);
+            if ($chunk === false || $chunk === '') break;
+            $copied += strlen($chunk);
+            if ($copied > $declared || $copied > $limit) { $tooBig = true; break; }
+            fwrite($out, $chunk);
+        }
         fclose($out);
         fclose($stream);
+        if ($tooBig) {
+            bundleDeleteDir($tmp);
+            $zip->close();
+            return ['ok' => false, 'error' => 'Das ZIP ist beschädigt oder manipuliert (Datei "' . $rel . '" ist grösser als angegeben). Upload abgebrochen.'];
+        }
+        $written += $copied;
     }
     $zip->close();
 

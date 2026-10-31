@@ -11,7 +11,7 @@
  *                spielt NUR ZIPs mit passendem Dateinamen ein.
  * UPDATE_GITHUB_REPO = GitHub-Repo, dessen Releases als Update-Quelle dienen.
  */
-define('APP_VERSION', '1.9.0');
+define('APP_VERSION', '1.9.1');
 define('DB_VERSION', 8);
 define('BRAND_NAME', 'Heftis Angebote');
 // Paketname der Update-ZIPs: angebotsviewer-vX.Y.Z.zip. Der alte Name

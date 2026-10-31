@@ -13,6 +13,7 @@
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/version.php';
 require_once __DIR__ . '/includes/migrations.php';
+require_once __DIR__ . '/includes/security.php';
 
 secureSession();
 if (empty($_SESSION['install_csrf'])) $_SESSION['install_csrf'] = bin2hex(random_bytes(16));
@@ -136,6 +137,7 @@ if (!$installed && ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && ($_POST['act
         try {
             installBaseSchema($db);
             runMigrations($db);
+            ensureUploadsProtection();
         } catch (Throwable $ex) {
             $errors[] = 'Tabellen konnten nicht angelegt werden: ' . $ex->getMessage();
         }

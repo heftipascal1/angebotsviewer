@@ -62,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error = $res['error'];
                 }
             } else {
-                $ok = move_uploaded_file($file['tmp_name'], __DIR__ . '/../uploads/' . $storedName);
+                $ok = ensureUploadsProtection() && move_uploaded_file($file['tmp_name'], __DIR__ . '/../uploads/' . $storedName);
                 if (!$ok) {
                     $error = 'Die Datei konnte nicht gespeichert werden. Prüfe die Schreibrechte im uploads-Ordner.';
                 }

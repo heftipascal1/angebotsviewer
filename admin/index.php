@@ -7,11 +7,13 @@ require_once __DIR__ . '/../includes/version.php';
 require_once __DIR__ . '/../includes/migrations.php';
 require_once __DIR__ . '/../includes/mailer.php';
 require_once __DIR__ . '/../includes/reminders.php';
+require_once __DIR__ . '/../includes/security.php';
 requireAdmin();
 
 $db = getDB();
 redirectIfMigrationPending($db);
 runRemindersIfDue($db);   // höchstens 1x pro Stunde
+ensureUploadsProtection(); // Upload-Ordner gesperrt halten (repariert sich selbst)
 
 // Filter (per GET, damit die Ansicht als Link merkbar bleibt)
 $filterStatus = (string)($_GET['status'] ?? 'open');   // open = alles außer Archiv

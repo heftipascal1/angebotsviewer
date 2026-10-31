@@ -149,7 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === '') {
             } else {
                 $storedName = $storageKey . '.html';
                 $targetPath = __DIR__ . '/../uploads/' . basename($storedName);
-                if (move_uploaded_file($file['tmp_name'], $targetPath)) {
+                if (ensureUploadsProtection() && move_uploaded_file($file['tmp_name'], $targetPath)) {
                     $vid = createVersion($db, $id, $versionNo, 'single', $storedName, null, $file['name'], $versionNote);
                     activateVersion($db, $id, $vid);
                     $changes[] = 'Version ' . $versionNo . ' angelegt und angezeigt (HTML-Datei)';

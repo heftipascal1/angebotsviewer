@@ -189,6 +189,8 @@ function githubFetchRelease(?string $tag = null): array {
         'asset_name' => (string)$asset['name'],
         'asset_url'  => (string)$asset['browser_download_url'],
         'asset_size' => (int)($asset['size'] ?? 0),
+        // SHA-256-Prüfsumme, die GitHub selbst für das Paket berechnet
+        'asset_digest' => (string)($asset['digest'] ?? ''),
     ];
 }
 
@@ -216,6 +218,11 @@ function githubInstallRelease(string $tag, string $appRoot): array {
     $data = updaterHttpGet($rel['asset_url'], ['Accept: application/octet-stream'], 120);
     if ($data === null || $data === '') {
         return ['copied' => 0, 'skipped' => [], 'errors' => ['Das Update-Paket konnte nicht von GitHub geladen werden.']];
+    }
+    // Unverändert angekommen? Mit der Prüfsumme vergleichen, die GitHub liefert.
+    if (preg_match('/^sha256:([a-f0-9]{64})$/i', $rel['asset_digest'], $m)
+        && !hash_equals(strtolower($m[1]), hash('sha256', $data))) {
+        return ['copied' => 0, 'skipped' => [], 'errors' => ['Prüfsumme des Update-Pakets stimmt nicht – Update abgebrochen.']];
     }
 
     $tmp = tempnam(sys_get_temp_dir(), 'ha-update-');

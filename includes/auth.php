@@ -3,7 +3,7 @@
 function requireAdmin(): void {
     secureSession();
     if (empty($_SESSION['admin_logged_in'])) {
-        header('Location: ' . BASE_URL);
+        header('Location: ' . BASE_URL . 'index.php');
         exit;
     }
 }

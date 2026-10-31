@@ -1,10 +1,34 @@
-# Direkter Zugriff auf hochgeladene Dateien komplett sperren.
-# Die HTML-Angebote werden ausschließlich über file.php (mit Passwortprüfung) ausgeliefert.
-Require all denied
+# ===== Angebotsviewer: Schutz des Upload-Ordners =====
+# Wird vom Tool automatisch angelegt und repariert – bitte nicht ändern.
+# Kein direkter Zugriff: Inhalte werden ausschließlich über file.php
+# ausgeliefert (mit Passwort-/Token-Prüfung und Sandbox).
 
-# PHP-Ausführung in diesem Ordner deaktivieren (Schutz vor Code-Upload)
-<FilesMatch "\.(php|phtml|php3|php4|php5|php7|phps|cgi|pl|py|asp|aspx|sh)$">
+<IfModule mod_authz_core.c>
     Require all denied
-</FilesMatch>
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order deny,allow
+    Deny from all
+</IfModule>
 
-php_flag engine off
+Options -Indexes -ExecCGI
+
+# Falls doch eine Datei durchrutschen sollte: niemals als Programm ausführen
+<IfModule mod_mime.c>
+    RemoveHandler .php .phtml .pht .phar .php3 .php4 .php5 .php7 .php8 .phps .cgi .pl .py .sh .asp .aspx .shtml
+    RemoveType .php .phtml .pht .phar .php3 .php4 .php5 .php7 .php8 .phps
+</IfModule>
+<FilesMatch "\.(php\d?|phtml|pht|phar|phps|cgi|pl|py|sh|asp|aspx|jsp|shtml)(\.|$)">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+</FilesMatch>
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php5.c>
+    php_flag engine off
+</IfModule>

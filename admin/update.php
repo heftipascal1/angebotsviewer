@@ -6,6 +6,7 @@ require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/version.php';
 require_once __DIR__ . '/../includes/migrations.php';
 require_once __DIR__ . '/../includes/updater.php';
+require_once __DIR__ . '/../includes/bundle.php';
 requireAdmin();
 
 $db = getDB();
@@ -15,6 +16,15 @@ $uploadResult = null;
 
 $appRoot = dirname(__DIR__);
 $dbVersion = getDbVersion($db);
+
+// Upload-Ordner-Sperre prüfen bzw. reparieren (z.B. nach einem Update per FTP)
+$uploadsLockOk = ensureUploadsProtection();
+
+// Update per ZIP-Upload schreibt Programmcode auf den Server. Deshalb ist es
+// standardmäßig AUS; Updates kommen nur aus deinem GitHub-Repository.
+// Einschalten (nur wenn nötig) mit dieser Zeile in config.php:
+//     define('ALLOW_ZIP_UPDATE', true);
+$zipUpdateAllowed = defined('ALLOW_ZIP_UPDATE') && ALLOW_ZIP_UPDATE === true;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'migrate') {
     verifyCsrf();
@@ -29,7 +39,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'migra
 // ===== Update per ZIP-Upload (mit Dateinamen-Prüfung) =====
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'upload_zip') {
     verifyCsrf();
-    if (!isset($_FILES['zip']) || $_FILES['zip']['error'] !== UPLOAD_ERR_OK) {
+    if (!$zipUpdateAllowed) {
+        $error = 'Update per ZIP-Upload ist aus Sicherheitsgründen ausgeschaltet. Bitte „Nach Updates suchen" (GitHub) verwenden.';
+    } elseif (!isset($_FILES['zip']) || $_FILES['zip']['error'] !== UPLOAD_ERR_OK) {
         $error = 'Bitte eine ZIP-Datei auswählen.';
     } else {
         $origName = $_FILES['zip']['name'];
@@ -82,6 +94,8 @@ $viewCount  = (int)$db->query("SELECT COUNT(*) FROM offer_views")->fetchColumn()
 // Schreibrechte uploads prüfen
 $uploadsWritable = is_writable(__DIR__ . '/../uploads');
 $installerPresent = is_file(__DIR__ . '/../install.php');
+// Live-Test: uploads/ darf von außen nicht erreichbar sein
+$uploadsSelfTest = uploadsProtectionSelfTest();
 ?>
 <!DOCTYPE html>
 <html lang="de">
@@ -189,6 +203,7 @@ $installerPresent = is_file(__DIR__ . '/../install.php');
         <?php endif; ?>
     </div>
 
+    <?php if ($zipUpdateAllowed): ?>
     <div class="card">
         <div class="card-header"><h2>Update einspielen (ZIP)</h2></div>
         <p class="form-hint" style="margin-bottom:1rem">
@@ -212,6 +227,19 @@ $installerPresent = is_file(__DIR__ . '/../install.php');
         </form>
     </div>
 
+    <?php else: ?>
+    <div class="card">
+        <div class="card-header"><h2>Update per ZIP-Upload</h2></div>
+        <p class="form-hint">
+            Aus Sicherheitsgründen <strong>ausgeschaltet</strong>: Ein Update-ZIP enthält Programmcode,
+            und wer es hochladen kann, könnte damit beliebigen Code auf den Server bringen.
+            Updates kommen deshalb nur aus deinem GitHub-Repository (oben) oder per FTP.
+            Falls du es doch brauchst, in <code>config.php</code> die Zeile
+            <code>define('ALLOW_ZIP_UPDATE', true);</code> ergänzen.
+        </p>
+    </div>
+    <?php endif; ?>
+
     <div class="card">
         <div class="card-header"><h2>Datenbank-Status</h2></div>
         <?php if ($needsMigration): ?>
@@ -232,8 +260,8 @@ $installerPresent = is_file(__DIR__ . '/../install.php');
     <div class="card">
         <div class="card-header"><h2>So aktualisierst du das Tool</h2></div>
         <p class="form-hint" style="margin-bottom:.8rem">
-            Am einfachsten oben über <strong>„Nach Updates suchen"</strong> (GitHub) oder per
-            ZIP-Upload. Der manuelle Weg per FTP geht weiterhin:
+            Am einfachsten oben über <strong>„Nach Updates suchen"</strong> (GitHub).
+            Der manuelle Weg per FTP geht weiterhin:
         </p>
         <ol style="padding-left:1.2rem;line-height:2;color:var(--text)">
             <li>Neue Version (ZIP) lokal entpacken.</li>
@@ -261,6 +289,28 @@ $installerPresent = is_file(__DIR__ . '/../install.php');
                 <td><?= $uploadsWritable
                     ? '<span class="badge badge-active">OK</span>'
                     : '<span class="badge badge-inactive">Nicht beschreibbar</span>' ?></td>
+            </tr>
+            <tr>
+                <td>Upload-Ordner von außen gesperrt (Live-Test)</td>
+                <td><?php if (!$uploadsSelfTest['tested']): ?>
+                        <span class="badge badge-inactive">Test nicht möglich</span>
+                    <?php elseif ($uploadsSelfTest['protected']): ?>
+                        <span class="badge badge-active">OK</span>
+                    <?php else: ?>
+                        <span class="badge badge-inactive">OFFEN – Status <?= (int)$uploadsSelfTest['code'] ?>!</span>
+                    <?php endif; ?></td>
+            </tr>
+            <tr>
+                <td>Sperrdatei uploads/.htaccess vorhanden</td>
+                <td><?= $uploadsLockOk
+                    ? '<span class="badge badge-active">OK</span>'
+                    : '<span class="badge badge-inactive">Konnte nicht geschrieben werden!</span>' ?></td>
+            </tr>
+            <tr>
+                <td>Update per ZIP-Upload</td>
+                <td><?= $zipUpdateAllowed
+                    ? '<span class="badge badge-inactive">Eingeschaltet</span>'
+                    : '<span class="badge badge-active">Aus (empfohlen)</span>' ?></td>
             </tr>
             <tr>
                 <td>install.php entfernt</td>

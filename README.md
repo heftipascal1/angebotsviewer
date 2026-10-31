@@ -78,11 +78,20 @@ einspielt. Danach – falls angezeigt – „Datenbank jetzt aktualisieren" klic
 Voraussetzung: der Webspace darf per PHP ins Internet (curl oder
 `allow_url_fopen`), was bei All-Inkl der Fall ist.
 
-### Weg 2: ZIP-Upload im Admin
+### Weg 2: ZIP-Upload im Admin (standardmäßig aus)
 
-Das Paket `angebotsviewer-vX.Y.Z.zip` von der GitHub-Release-Seite laden und
-im Admin unter „Update" hochladen. Es werden nur ZIPs mit passendem Namen und
-internem Marker akzeptiert.
+Ein Update-ZIP enthält Programmcode. Damit niemand mit Admin-Zugang darüber
+eigenen Code auf den Server bringen kann, ist dieser Weg ab Version 1.9.1
+**ausgeschaltet**. Nur wenn nötig in `config.php` ergänzen:
+
+```php
+define('ALLOW_ZIP_UPDATE', true);
+```
+
+Dann das Paket `angebotsviewer-vX.Y.Z.zip` von der GitHub-Release-Seite im Admin
+unter „Update" hochladen. Akzeptiert werden nur ZIPs mit passendem Namen und
+internem Marker. Das Update über GitHub (Weg 1) prüft zusätzlich die
+SHA-256-Prüfsumme, die GitHub für jedes Paket mitliefert.
 
 ### Weg 3: per FTP
 
@@ -184,18 +193,39 @@ Wenn du das Tool in einen **Unterordner** legst, in `.htaccess` ggf.
 
 ## Sicherheit
 
+**Hochgeladene Inhalte sind vollständig isoliert:**
+
+- **Nur in `uploads/`:** ZIPs werden ausschließlich in den Ordner des jeweiligen
+  Angebots entpackt. Pfade mit `..`, absolute Pfade, versteckte Dateien
+  (`.htaccess`, `.user.ini` …), symbolische Links und `__MACOSX`-Reste werden verworfen.
+- **Nichts wird auf dem Server ausgeführt:** Nur eine Positivliste harmloser
+  Dateitypen (HTML, CSS, JS, Bilder, Schriften, Medien, PDF). Dateien mit
+  gefährlicher Endung an *irgendeiner* Stelle (`shell.php`, `bild.php.png`,
+  `x.phtml`, `a.phar.jpg`, `seite.shtml.html` …) werden abgelehnt. `file.php`
+  liest Dateien nur, es führt sie nie aus.
+- **Upload-Ordner von außen gesperrt:** `uploads/.htaccess` sperrt jeden direkten
+  Zugriff und schaltet die PHP-Ausführung ab. Das Tool legt die Sperre selbst an,
+  repariert sie automatisch (z.B. nach einem FTP-Update) und prüft sie auf der
+  Update-Seite per Live-Test.
+- **Abgeschottet im Browser:** HTML, SVG und XML aus Uploads werden immer mit
+  `Content-Security-Policy: sandbox` ausgeliefert – auch wenn jemand die Datei
+  direkt in einem Tab öffnet. Sie laufen so in einem eigenen Ursprung und können
+  nie im Namen eines eingeloggten Admins handeln.
+- **ZIP-Bomben:** max. 60 MB Upload, entpackt max. 80 MB / 800 Dateien / 30 MB
+  pro Datei. Die Grenzen gelten beim Schreiben hart – auch wenn das ZIP falsche
+  Größen angibt, wird abgebrochen und nichts bleibt liegen.
+
+**Weitere Schutzmaßnahmen:**
+
 - Passwörter (Admin + Angebote) werden mit **bcrypt** gehasht gespeichert
 - Uploads liegen in einem per `.htaccess` **gesperrten Ordner** und werden nur
   nach Passworteingabe über `file.php` ausgeliefert — der Link allein reicht nicht
-- PHP-Ausführung im `uploads/`-Ordner ist deaktiviert
 - CSRF-Schutz im Admin-Bereich und im Installer
 - Installer sperrt sich selbst, sobald `config.php` existiert
 - Einzeldatei: nur `.html` / `.htm`, max. 10 MB
-- ZIP: max. 60 MB, entpackt max. 80 MB / 800 Dateien (Schutz vor ZIP-Bomben);
-  übernommen werden nur ungefährliche Dateitypen (HTML, CSS, JS, Bilder, Schriften,
-  Medien, PDF). **PHP & Skripte im ZIP werden verworfen**, ebenso versteckte Dateien,
-  `__MACOSX`-Reste und Pfade mit `..` (kein Verzeichnis-Ausbruch)
 - `cron.php` arbeitet nur mit dem geheimen Schlüssel aus den Einstellungen
+- Updates per ZIP-Upload sind standardmäßig aus; GitHub-Updates werden per
+  SHA-256-Prüfsumme kontrolliert
 
 ---
 

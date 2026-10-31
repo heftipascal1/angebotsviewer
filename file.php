@@ -145,9 +145,8 @@ if ($isBundle) {
     }
 
     header('Content-Type: ' . bundleMimeType($ext));
-    header('X-Content-Type-Options: nosniff');
-    header('X-Frame-Options: SAMEORIGIN');
-    header('Content-Security-Policy: frame-ancestors \'self\';');
+    // HTML/SVG/XML laufen immer abgeschottet (auch direkt in einem Tab geöffnet)
+    sendUploadSecurityHeaders($ext);
     // Nicht zwischenspeichern: der Link ist personengebunden.
     header('Cache-Control: private, no-store');
 
@@ -178,6 +177,6 @@ if (!is_file($path)) {
 }
 
 header('Content-Type: text/html; charset=utf-8');
-header('X-Frame-Options: SAMEORIGIN');
-header('Content-Security-Policy: frame-ancestors \'self\';');
+header('Cache-Control: private, no-store');
+sendUploadSecurityHeaders('html');
 readfile($path);
