@@ -5,6 +5,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/bundle.php';
 require_once __DIR__ . '/../includes/versions.php';
+require_once __DIR__ . '/../includes/tracking.php';
 require_once __DIR__ . '/../includes/version.php';
 require_once __DIR__ . '/../includes/migrations.php';
 requireAdmin();
@@ -48,7 +49,7 @@ $stats = $stmt->fetch();
 
 // Recent individual views (mit Versionsnummer)
 $stmt = $db->prepare("
-    SELECT vw.started_at, vw.duration_seconds, vw.ip_hash, vw.user_agent, ver.version_no
+    SELECT vw.id, vw.started_at, vw.duration_seconds, vw.ip_hash, vw.user_agent, ver.version_no
     FROM offer_views vw
     LEFT JOIN offer_versions ver ON ver.id = vw.version_id
     WHERE vw.offer_id = ?
@@ -71,6 +72,28 @@ $stmt = $db->prepare("
 $stmt->execute([$id]);
 $versionStats = $stmt->fetchAll();
 $currentVersionId = (int)($offer['current_version_id'] ?? 0);
+
+// Zeit pro Unterseite (mehrseitige Angebote)
+$stmt = $db->prepare("
+    SELECT page, COUNT(DISTINCT view_id) AS visits, SUM(seconds) AS total, MAX(seconds) AS longest
+    FROM offer_page_views
+    WHERE offer_id = ?
+    GROUP BY page
+    ORDER BY total DESC, visits DESC
+");
+$stmt->execute([$id]);
+$pageStats = $stmt->fetchAll();
+$maxPageTotal = max(1, (int)max(array_column($pageStats, 'total') ?: [0]));
+
+// Seiten je einzelnem Aufruf
+$pagesByView = [];
+if ($views) {
+    $ids = implode(',', array_map(fn($v) => (int)$v['id'], $views));
+    foreach ($db->query("SELECT view_id, page, seconds FROM offer_page_views WHERE view_id IN ($ids) ORDER BY seconds DESC") as $pr) {
+        $pagesByView[(int)$pr['view_id']][] = $pr;
+    }
+}
+$pageFolder = (string)$offer['filename'];
 
 // Views per day (last 14 days)
 $stmt = $db->prepare("
@@ -216,6 +239,38 @@ $offerMessage = renderOfferMessage($tpl, [
     </div>
     <?php endif; ?>
 
+    <?php if (!empty($pageStats)): ?>
+    <div class="card">
+        <div class="card-header"><h2>Zeit pro Seite</h2></div>
+        <p class="form-hint" style="margin-bottom:1rem">Welche Unterseiten deines mehrseitigen Angebots angesehen wurden und wie lange (nur sichtbare Zeit).</p>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Seite</th>
+                        <th>Besuche</th>
+                        <th>Zeit gesamt</th>
+                        <th>&#8709; pro Besuch</th>
+                        <th style="width:30%"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($pageStats as $ps): $visits = max(1, (int)$ps['visits']); ?>
+                    <tr>
+                        <td><strong><?= e(pageLabel($pageFolder, (string)$ps['page'])) ?></strong><br>
+                            <span style="font-size:.72rem;color:var(--text-muted)"><?= e((string)$ps['page']) ?></span></td>
+                        <td><?= (int)$ps['visits'] ?></td>
+                        <td><?= formatDuration((int)$ps['total']) ?></td>
+                        <td><?= formatDuration((int)round((int)$ps['total'] / $visits)) ?></td>
+                        <td><div style="height:8px;border-radius:4px;background:var(--primary);opacity:.8;width:<?= max(2, round((int)$ps['total'] / $maxPageTotal * 100)) ?>%"></div></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <div class="card">
         <div class="card-header"><h2>Einzelne Aufrufe</h2></div>
         <?php if (empty($views)): ?>
@@ -231,6 +286,7 @@ $offerMessage = renderOfferMessage($tpl, [
                             <th>System</th>
                             <th>Browser</th>
                             <th>Version</th>
+                            <th>Seiten</th>
                             <th>Besucher</th>
                         </tr>
                     </thead>
@@ -243,6 +299,17 @@ $offerMessage = renderOfferMessage($tpl, [
                             <td><?= e($ua['os']) ?></td>
                             <td><?= e($ua['browser']) ?></td>
                             <td><?= !empty($v['version_no']) ? 'V' . (int)$v['version_no'] : '<span style="color:var(--text-muted)">–</span>' ?></td>
+                            <td style="font-size:.8rem">
+                                <?php $vp = $pagesByView[(int)$v['id']] ?? []; ?>
+                                <?php if (!$vp): ?>
+                                    <span style="color:var(--text-muted)">–</span>
+                                <?php else: ?>
+                                    <?php foreach (array_slice($vp, 0, 3) as $pr): ?>
+                                        <?= e(pageLabel($pageFolder, (string)$pr['page'])) ?> <span style="color:var(--text-muted)"><?= formatDuration((int)$pr['seconds']) ?></span><br>
+                                    <?php endforeach; ?>
+                                    <?php if (count($vp) > 3): ?><span style="color:var(--text-muted)">+ <?= count($vp) - 3 ?> weitere</span><?php endif; ?>
+                                <?php endif; ?>
+                            </td>
                             <td><span style="font-family:monospace;font-size:.75rem;color:var(--text-muted)">#<?= substr($v['ip_hash'], 0, 8) ?></span></td>
                         </tr>
                     <?php endforeach; ?>

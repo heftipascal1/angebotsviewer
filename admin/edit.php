@@ -90,7 +90,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === '') {
             : null;
         $oldExpires = $offer['expires_at'] ?? null;
         if ($newExpires !== $oldExpires) {
-            $db->prepare("UPDATE offers SET expires_at = ? WHERE id = ?")->execute([$newExpires, $id]);
+            // Neues Ablaufdatum -> Ablauf-Erinnerung darf erneut kommen
+            $db->prepare("UPDATE offers SET expires_at = ?, reminded_expiry_at = NULL WHERE id = ?")->execute([$newExpires, $id]);
             $changes[] = $newExpires ? 'Ablaufdatum gesetzt' : 'Ablaufdatum entfernt';
         }
 
@@ -333,7 +334,8 @@ $currentVersionId = (int)($offer['current_version_id'] ?? 0);
         <?php else: ?>
             <p class="form-hint" style="margin-bottom:1rem">
                 Der Kunde sieht immer die <strong>angezeigte</strong> Version (standardmäßig die neueste).
-                Mit „Anzeigen" schaltest du auf eine andere Version um – der Link bleibt derselbe.
+                Mit „Vorschau" siehst du dir eine Version an, ohne dass sich für den Kunden etwas ändert;
+                mit „Anzeigen" schaltest du um – der Link bleibt derselbe.
             </p>
             <div class="table-wrap">
                 <table>
@@ -367,6 +369,7 @@ $currentVersionId = (int)($offer['current_version_id'] ?? 0);
                                 <?php endif; ?>
                             </td>
                             <td style="white-space:nowrap">
+                                <a href="preview.php?id=<?= $id ?>&amp;version=<?= (int)$v['id'] ?>" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Vorschau</a>
                                 <?php if (!$isCurrent): ?>
                                     <form method="post" style="display:inline">
                                         <?= csrfField() ?>

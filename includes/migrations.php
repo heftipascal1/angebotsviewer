@@ -182,6 +182,30 @@ function migrations(): array {
                 WHERE vw.version_id IS NULL AND o.current_version_id IS NOT NULL
             ");
         },
+
+        // v1.9.0: Zeit pro Unterseite (mehrseitige Angebote) + Erinnerungen
+        8 => function (PDO $db) {
+            if (!tableExists($db, 'offer_page_views')) {
+                $db->exec("
+                    CREATE TABLE offer_page_views (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        view_id INT NOT NULL,
+                        offer_id INT NOT NULL,
+                        page VARCHAR(255) NOT NULL,
+                        seconds INT NOT NULL DEFAULT 0,
+                        first_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE KEY uniq_view_page (view_id, page(191)),
+                        KEY idx_offer (offer_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                ");
+            }
+            if (!columnExists($db, 'offers', 'reminded_unopened_at')) {
+                $db->exec("ALTER TABLE offers ADD COLUMN reminded_unopened_at DATETIME NULL DEFAULT NULL");
+            }
+            if (!columnExists($db, 'offers', 'reminded_expiry_at')) {
+                $db->exec("ALTER TABLE offers ADD COLUMN reminded_expiry_at DATETIME NULL DEFAULT NULL");
+            }
+        },
     ];
 }
 

@@ -81,7 +81,7 @@ jobs:
           # Alles außer Git/CI-Dateien, lokaler Konfiguration und Upload-Inhalten
           rsync -a ./ "$STAGE/" \
             --exclude '.git' --exclude '.github' --exclude '.gitignore' \
-            --exclude 'config.php' --exclude 'install.php' \
+            --exclude 'config.php' \
             --exclude 'uploads/*' --exclude '.DS_Store' --exclude 'dist'
           mkdir -p "$STAGE/uploads"
           cp uploads/.htaccess uploads/.gitkeep "$STAGE/uploads/"

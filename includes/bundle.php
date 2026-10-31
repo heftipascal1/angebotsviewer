@@ -497,3 +497,48 @@ function bundleResolveFile(string $base, string $rel): ?string {
     }
     return null;
 }
+
+/* =====================================================================
+   Vorschau einer bestimmten Version (nur für den Admin)
+   ---------------------------------------------------------------------
+   Token-Format im Pfad: v{versionId}-{ablauf}-{signatur}. Es ist an Slug
+   UND Version gebunden, läuft nach einer Stunde ab und wird – wie das
+   Kunden-Token – ohne Session geprüft. Aufrufe über ein Vorschau-Token
+   werden nie gezählt.
+   ===================================================================== */
+
+const BUNDLE_PREVIEW_TTL = 3600;
+
+function bundlePreviewToken(string $slug, int $versionId, int $ttl = BUNDLE_PREVIEW_TTL): string {
+    $exp = time() + $ttl;
+    $sig = substr(hash_hmac('sha256', $slug . '|v|' . $versionId . '|' . $exp, APP_SECRET), 0, 32);
+    return 'v' . $versionId . '-' . $exp . '-' . $sig;
+}
+
+function bundleIsPreviewSegment(string $segment): bool {
+    return (bool)preg_match('/^v\d+-\d{10,}-[a-f0-9]{32}$/', $segment);
+}
+
+/** Liefert die Versions-ID eines gültigen Vorschau-Tokens, sonst 0. */
+function bundleVerifyPreviewToken(string $slug, string $token): int {
+    if (!bundleIsPreviewSegment($token)) return 0;
+    [$vPart, $expPart, $sig] = explode('-', $token, 3);
+    $vid = (int)substr($vPart, 1);
+    $exp = (int)$expPart;
+    if ($vid <= 0 || $exp < time()) return 0;
+    $expected = substr(hash_hmac('sha256', $slug . '|v|' . $vid . '|' . $exp, APP_SECRET), 0, 32);
+    return hash_equals($expected, $sig) ? $vid : 0;
+}
+
+/**
+ * Fügt in eine ausgelieferte HTML-Seite ein winziges Script ein, das dem
+ * Viewer meldet, welche Unterseite gerade offen ist (für die Zeit pro Seite).
+ * Es sendet nur den Pfad an das umgebende Fenster – keine Daten nach außen.
+ */
+function bundleInjectPageSignal(string $html, string $page): string {
+    $json = json_encode($page, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP);
+    $tag = '<script>try{parent.postMessage({__av:"page",p:' . $json . '},"*")}catch(e){}</script>';
+    $pos = stripos($html, '</head>');
+    if ($pos === false) $pos = stripos($html, '</body>');
+    return $pos === false ? $html . $tag : substr($html, 0, $pos) . $tag . substr($html, $pos);
+}

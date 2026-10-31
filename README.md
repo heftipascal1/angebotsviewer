@@ -47,6 +47,15 @@ Läuft auf jedem **PHP + MySQL** Webspace (z.B. All-Inkl) — kein Node.js, kein
   Angebote/Statistiken zu verlieren (DB-Migrationen sind additiv)
 - **E-Mail-Benachrichtigung** bei Aufruf (mit Spam-Schutz: max. 1 Mail pro
   Besucher/Angebot je 6 h)
+- **Ehrliche Zahlen:** Link-Vorschauen (WhatsApp, iMessage, Outlook, Slack …)
+  und Bots zählen nicht als Aufruf und lösen keine E-Mail aus. Bei Angeboten
+  ohne Passwort wird erst gezählt, wenn die Seite wirklich im Browser läuft.
+  Eigene Aufrufe als eingeloggter Admin werden nie gezählt
+- **Zeit pro Seite** bei mehrseitigen Angeboten: welche Unterseiten wie lange
+  angesehen wurden, gesamt und pro Aufruf
+- **Erinnerungen per E-Mail**, wenn ein Angebot nach X Tagen noch nicht geöffnet
+  wurde oder bald abläuft (optional mit Cronjob für pünktliche Prüfung)
+- **Vorschau jeder Version** im Admin, ohne dass sich für den Kunden etwas ändert
 - **Brute-Force-Schutz** bei Passworteingabe (Sperre nach 5 Fehlversuchen für 10 Min.)
 - **Ablaufdatum** pro Angebot + **Pausieren/Reaktivieren** ohne Löschen
 - **CSV-Export** der Statistik (Excel-freundlich, DSGVO-konform anonymisiert)
@@ -80,6 +89,8 @@ internem Marker akzeptiert.
 1. Neue Version (ZIP) lokal entpacken.
 2. Per FTP **alle Dateien überschreiben — außer** dem Ordner `uploads/` und der
    Datei `config.php`. (Darin liegen deine Angebote & Zugangsdaten.)
+   `install.php` brauchst du bei einem Update nicht hochzuladen. Landet sie doch
+   auf dem Server, ist sie gesperrt; die Update-Seite erinnert dich ans Löschen.
 3. Im Admin **„Update"** öffnen (`admin/update.php`). Falls eine
    Datenbank-Anpassung nötig ist, erscheint ein Button „Datenbank jetzt
    aktualisieren" — ein Klick, und fertig. Migrationen sind **additiv**:
@@ -104,3 +115,115 @@ bestehenden Angebote/Aufrufe zur Kontrolle.
    Existiert für die Version schon ein Release, passiert nichts. Ab dann
    finden es installierte Versionen über „Nach Updates suchen".
    Alternativ lässt sich der Workflow unter „Actions" auch manuell starten.
+
+---
+
+## Installation auf All-Inkl (oder anderem Webspace)
+
+1. **Hochladen:** Das Paket `angebotsviewer-vX.Y.Z.zip` von der GitHub-Release-Seite
+   laden, entpacken und den Inhalt des Ordners `angebotsviewer/` per FTP in dein
+   Webspace-Verzeichnis kopieren (z.B. nach `/angebote/`).
+
+2. **MySQL-Datenbank:** Im All-Inkl KAS eine MySQL-Datenbank anlegen
+   (Name, Benutzer, Passwort notieren).
+
+3. **Installer öffnen:** Im Browser `https://deine-domain.de/angebote/install.php`
+   aufrufen. Er prüft die Voraussetzungen und fragt ab:
+   - Datenbank-Host (bei All-Inkl meist `localhost`)
+   - Datenbank-Name / Benutzer / Passwort
+   - **Admin-Passwort** (damit loggst du dich ins Dashboard ein)
+   - Basis-URL (wird automatisch vorgeschlagen)
+
+   Der Installer legt alle Tabellen an und schreibt `config.php`. Fehlen dafür
+   Schreibrechte, zeigt er den Inhalt zum Hochladen per FTP an.
+
+4. **install.php löschen:** Am Ende per Klick („install.php löschen & zum Login")
+   oder per FTP. Solange `config.php` existiert, ist der Installer ohnehin gesperrt.
+
+5. **Schreibrechte:** Der Ordner `uploads/` muss für PHP beschreibbar sein
+   (meist 755 oder 775). Bei All-Inkl normalerweise out-of-the-box ok.
+
+6. **Fertig:** `https://deine-domain.de/angebote/` öffnen → mit dem
+   Admin-Passwort einloggen.
+
+---
+
+## Schöne Links (`/a/xxxx`)
+
+Das Tool nutzt `mod_rewrite` für saubere Links wie `…/angebote/a/ab12cd34`.
+Funktioniert bei All-Inkl standardmäßig. Falls die Links nicht gehen
+(Server ohne mod_rewrite), funktionieren auch direkt:
+`…/angebote/view.php?slug=ab12cd34`
+
+Für **mehrseitige Inhalte** muss jede Datei unter einem echten Pfad erreichbar
+sein, sonst lösen relative Links (`assets/css/style.css`) nicht auf. Dafür gibt es
+zwei Wege, die beide unterstützt werden:
+
+| Weg | URL | Voraussetzung |
+|-----|-----|---------------|
+| `rewrite` | `/f/{slug}/{pfad}` | `mod_rewrite` (`.htaccess`) |
+| `pathinfo` | `file.php/{slug}/{pfad}` | `AcceptPathInfo` (Standard) |
+
+Beim Hochladen eines ZIPs prüft das Tool **automatisch**, welcher Weg auf dem
+Server funktioniert, und merkt sich das Ergebnis (Einstellung `bundle_delivery`).
+
+Zusätzlich steckt nach der Passworteingabe ein **signiertes Zugriffs-Token** im
+Pfad (`/f/{slug}/{token}/{pfad}`, 12 h gültig, HMAC über den Slug mit
+`APP_SECRET`). Das ist nötig, weil der Browser im abgeschotteten iframe keine
+Cookies an nachgeladene Dateien (CSS, JS, Schriften) sendet — ohne Token käme
+die Seite ohne Design an. Das Token wird serverseitig ohne Session geprüft und
+leakt dank `Referrer-Policy: no-referrer` nicht nach außen. Die Admin-Vorschau
+einer Version nutzt ein eigenes, an die Version gebundenes Token (1 h gültig).
+Klappt keiner von beiden Wegen, wird direkt im Admin gewarnt — dann fehlt meist
+die aktuelle `.htaccess` im Hauptordner.
+
+Wenn du das Tool in einen **Unterordner** legst, in `.htaccess` ggf.
+`RewriteBase /angebote/` ergänzen.
+
+---
+
+## Sicherheit
+
+- Passwörter (Admin + Angebote) werden mit **bcrypt** gehasht gespeichert
+- Uploads liegen in einem per `.htaccess` **gesperrten Ordner** und werden nur
+  nach Passworteingabe über `file.php` ausgeliefert — der Link allein reicht nicht
+- PHP-Ausführung im `uploads/`-Ordner ist deaktiviert
+- CSRF-Schutz im Admin-Bereich und im Installer
+- Installer sperrt sich selbst, sobald `config.php` existiert
+- Einzeldatei: nur `.html` / `.htm`, max. 10 MB
+- ZIP: max. 60 MB, entpackt max. 80 MB / 800 Dateien (Schutz vor ZIP-Bomben);
+  übernommen werden nur ungefährliche Dateitypen (HTML, CSS, JS, Bilder, Schriften,
+  Medien, PDF). **PHP & Skripte im ZIP werden verworfen**, ebenso versteckte Dateien,
+  `__MACOSX`-Reste und Pfade mit `..` (kein Verzeichnis-Ausbruch)
+- `cron.php` arbeitet nur mit dem geheimen Schlüssel aus den Einstellungen
+
+---
+
+## Ordnerstruktur
+
+```
+angebotsviewer/
+├── install.php          ← Installer (nach Setup löschen)
+├── index.php            ← Admin-Login
+├── view.php             ← Öffentliche Ansicht + Passwortabfrage
+├── file.php             ← Sichere Auslieferung (Einzel-HTML + Bundle-Dateien)
+├── cron.php             ← Erinnerungen per Cronjob (mit Schlüssel)
+├── config.php           ← Wird vom Installer erzeugt
+├── config.sample.php    ← Vorlage
+├── .htaccess            ← Routing + Schutz
+├── admin/
+│   ├── index.php        ← Dashboard (Übersicht, Filter, Archiv)
+│   ├── upload.php       ← Neues Angebot hochladen
+│   ├── edit.php         ← Bearbeiten + Versionsverlauf
+│   ├── preview.php      ← Vorschau einer Version (wird nicht gezählt)
+│   ├── stats.php        ← Statistik (Versionen, Zeit pro Seite, Aufrufe)
+│   ├── settings.php     ← E-Mail, Erinnerungen, Nachrichten-Vorlage
+│   ├── update.php       ← Updates (GitHub / ZIP) + DB-Migrationen
+│   └── export.php, logout.php
+├── api/
+│   └── track.php        ← Aufruf-Start, Verweildauer, Zeit pro Seite
+├── assets/
+│   └── style.css
+├── includes/            ← (gesperrt) DB, Auth, Tracking, Versionen, Updater …
+└── uploads/             ← (gesperrt) Hochgeladene Angebote aller Versionen
+```

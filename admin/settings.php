@@ -5,9 +5,12 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/version.php';
 require_once __DIR__ . '/../includes/mailer.php';
+require_once __DIR__ . '/../includes/migrations.php';
+require_once __DIR__ . '/../includes/reminders.php';
 requireAdmin();
 
 $db = getDB();
+redirectIfMigrationPending($db);
 $msg = '';
 $msgType = 'success';
 
@@ -26,6 +29,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             setSetting($db, 'notify_email', $email);
             setSetting($db, 'notify_enabled', $enabled);
             $msg = 'Einstellungen gespeichert.';
+        }
+    } elseif ($action === 'save_reminders') {
+        setSetting($db, 'reminder_enabled', isset($_POST['reminder_enabled']) ? '1' : '0');
+        setSetting($db, 'reminder_unopened_days', (string)max(1, min(60, (int)($_POST['reminder_unopened_days'] ?? 3))));
+        setSetting($db, 'reminder_expiry_days', (string)max(1, min(30, (int)($_POST['reminder_expiry_days'] ?? 2))));
+        $msg = 'Erinnerungen gespeichert.';
+    } elseif ($action === 'run_reminders') {
+        $r = runReminders($db);
+        setSetting($db, 'reminder_last_run', (string)time());
+        if ($r['error']) {
+            $msg = $r['error'];
+            $msgType = 'error';
+        } elseif ($r['sent']) {
+            $msg = 'Erinnerung verschickt: ' . $r['unopened'] . ' ungeöffnet, ' . $r['expiring'] . ' läuft bald ab.';
+        } else {
+            $msg = 'Geprüft – gerade ist nichts fällig.';
         }
     } elseif ($action === 'save_template') {
         $tpl = (string)($_POST['message_template'] ?? '');
@@ -54,6 +73,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $notifyEmail = (string)getSetting($db, 'notify_email', '');
 $notifyEnabled = getSetting($db, 'notify_enabled', '0') === '1';
 $messageTemplate = getSetting($db, 'message_template', '') ?: defaultMessageTemplate();
+$reminders = reminderSettings($db);
+$cronUrl = BASE_URL . 'cron.php?key=' . cronKey($db);
 ?>
 <!DOCTYPE html>
 <html lang="de">
@@ -113,6 +134,50 @@ $messageTemplate = getSetting($db, 'message_template', '') ?: defaultMessageTemp
                 Sendet eine Test-Nachricht an die gespeicherte Adresse, um den Versand zu prüfen.
             </p>
         </form>
+    </div>
+
+    <div class="card">
+        <div class="card-header"><h2>Erinnerungen</h2></div>
+        <p class="form-hint" style="margin-bottom:1.5rem">
+            Du bekommst eine E-Mail an die Benachrichtigungs-Adresse oben, wenn ein Angebot
+            nach einigen Tagen noch nicht geöffnet wurde oder bald abläuft – jeweils nur einmal pro Angebot.
+        </p>
+        <form method="post">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="save_reminders">
+            <div class="form-group">
+                <label style="display:flex;align-items:center;gap:.6rem;cursor:pointer">
+                    <input type="checkbox" name="reminder_enabled" value="1" <?= $reminders['enabled'] ? 'checked' : '' ?> style="width:auto">
+                    Erinnerungen aktivieren
+                </label>
+            </div>
+            <div class="form-group">
+                <label>„Noch nicht geöffnet" nach … Tagen</label>
+                <input type="number" name="reminder_unopened_days" min="1" max="60" value="<?= (int)$reminders['unopened_days'] ?>">
+            </div>
+            <div class="form-group">
+                <label>„Läuft bald ab" … Tage vor dem Ablaufdatum</label>
+                <input type="number" name="reminder_expiry_days" min="1" max="30" value="<?= (int)$reminders['expiry_days'] ?>">
+            </div>
+            <button type="submit" class="btn btn-primary">Speichern</button>
+        </form>
+
+        <hr style="border:none;border-top:1px solid var(--border);margin:1.5rem 0">
+
+        <form method="post">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="run_reminders">
+            <button type="submit" class="btn btn-ghost">Jetzt prüfen</button>
+        </form>
+        <p class="form-hint" style="margin-top:1rem">
+            Geprüft wird automatisch höchstens einmal pro Stunde, sobald du das Dashboard öffnest oder ein Kunde
+            ein Angebot aufruft. Für pünktliche Erinnerungen kannst du zusätzlich einen Cronjob
+            (bei All-Inkl im KAS unter „Tools → Cronjobs") auf diese Adresse einrichten, z.&nbsp;B. stündlich:
+        </p>
+        <div class="link-box" style="margin-top:.5rem">
+            <input type="text" value="<?= e($cronUrl) ?>" readonly id="cronUrl">
+            <button type="button" class="btn btn-primary btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('cronUrl').value)">Kopieren</button>
+        </div>
     </div>
 
     <div class="card">

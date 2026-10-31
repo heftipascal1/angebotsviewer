@@ -12,6 +12,7 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/functions.php';
 require_once __DIR__ . '/includes/bundle.php';
+require_once __DIR__ . '/includes/versions.php';
 
 secureSession();
 
@@ -49,8 +50,36 @@ if (!$offer) {
     exit;
 }
 
-// Archiviert, pausiert oder abgelaufen? Dann auch keine Dateien mehr ausliefern.
-if (offerStatus($offer) !== 'active') {
+// ===== Admin-Vorschau einer bestimmten Version =====
+// Einzeldatei: file.php?slug=…&pv={token} · Mehrseitig: /f/{slug}/{token}/{pfad}
+$previewToken = '';
+$previewVid   = 0;
+$pvCandidate  = (string)($_GET['pv'] ?? '');
+if ($pvCandidate === '') {
+    $tmpRel = ltrim(str_replace('\\', '/', $relRaw), '/');
+    $tmpSeg = strpos($tmpRel, '/') === false ? $tmpRel : substr($tmpRel, 0, strpos($tmpRel, '/'));
+    if (bundleIsPreviewSegment($tmpSeg)) {
+        $pvCandidate = $tmpSeg;
+        $relRaw = (string)substr($tmpRel, strlen($tmpSeg) + 1);
+    }
+}
+if ($pvCandidate !== '') {
+    $previewVid = bundleVerifyPreviewToken($slug, $pvCandidate);
+    $pv = $previewVid > 0 ? versionById($db, (int)$offer['id'], $previewVid) : null;
+    if ($pv === null) {
+        http_response_code(403);
+        exit;
+    }
+    $previewToken = $pvCandidate;
+    // Angebot so behandeln, als wäre diese Version aktiv (nur für diese Anfrage)
+    $offer['bundle_type'] = $pv['bundle_type'];
+    $offer['filename']    = $pv['filename'];
+    $offer['entry_file']  = $pv['entry_file'];
+}
+
+// Archiviert, pausiert oder abgelaufen? Dann auch keine Dateien mehr ausliefern
+// (die Admin-Vorschau funktioniert trotzdem).
+if ($previewToken === '' && offerStatus($offer) !== 'active') {
     http_response_code(410);
     exit;
 }
@@ -60,9 +89,9 @@ $isBundle = (($offer['bundle_type'] ?? 'single') === 'bundle');
 // Bei mehrseitigen Angeboten steht ggf. ein Zugriffs-Token vorne im Pfad.
 // Es ersetzt die Session, weil der Browser im abgeschotteten iframe keine
 // Cookies an nachgeladene Dateien (CSS/JS/Schriften) sendet.
-$hasToken = false;
-$token    = '';
-if ($isBundle) {
+$hasToken = $previewToken !== '';
+$token    = $previewToken;
+if ($isBundle && !$hasToken) {
     $rel = ltrim(str_replace('\\', '/', $relRaw), '/');
     $slashPos = strpos($rel, '/');
     $firstSeg = $slashPos === false ? $rel : substr($rel, 0, $slashPos);
@@ -127,6 +156,10 @@ if ($isBundle) {
         if ($token === '') $token = bundleAccessToken($slug);
         $urlBase = bundleFileUrl($db, $slug, '', $token);
         $body = bundleRewriteRootUrls((string)file_get_contents($path), $urlBase, $ext);
+        if ($ext !== 'css') {
+            // Unterseite an den Viewer melden (Zeit pro Seite in der Statistik)
+            $body = bundleInjectPageSignal($body, ltrim(str_replace('\\', '/', substr($path, strlen($base))), '/'));
+        }
         header('Content-Length: ' . strlen($body));
         echo $body;
         exit;

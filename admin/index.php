@@ -5,10 +5,13 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/version.php';
 require_once __DIR__ . '/../includes/migrations.php';
+require_once __DIR__ . '/../includes/mailer.php';
+require_once __DIR__ . '/../includes/reminders.php';
 requireAdmin();
 
 $db = getDB();
 redirectIfMigrationPending($db);
+runRemindersIfDue($db);   // höchstens 1x pro Stunde
 
 // Filter (per GET, damit die Ansicht als Link merkbar bleibt)
 $filterStatus = (string)($_GET['status'] ?? 'open');   // open = alles außer Archiv
