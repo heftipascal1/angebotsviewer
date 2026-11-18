@@ -59,7 +59,9 @@ if ($isBot && !$hasPassword) {
 
 // Ohne Passwort: Zugang sofort. Der Aufruf wird aber erst gezählt, wenn die
 // Seite im Browser läuft (JavaScript meldet sich bei api/track.php).
-if (!$hasPassword && !$isAdmin) {
+// Der Admin bekommt den Zugang ebenfalls (ohne Zählung) – sonst verweigert
+// file.php die Einzel-HTML im Fenster und es bleibt weiß.
+if ((!$hasPassword && !$isBot) || $isAdmin) {
     $_SESSION[$sessionKey] = true;
 }
 
